@@ -1,0 +1,22 @@
+{
+  "name": "museum-scraper",
+  "version": "1.0.0",
+  "description": "Global museum scraping system",
+  "main": "scripts/master-scraper.js",
+  "scripts": {
+    "start": "node scripts/master-scraper.js",
+    "process": "node scripts/process-queue.js",
+    "validate": "node scripts/data-validator.js"
+  },
+  "dependencies": {
+    "puppeteer": "^21.5.0",
+    "mongodb": "^6.3.0",
+    "axios": "^1.6.0",
+    "cheerio": "^1.0.0-rc.12",
+    "sharp": "^0.32.6",
+    "user-agents": "^1.1.0",
+    "proxy-agent": "^6.3.1",
+    "dotenv": "^16.3.1",
+    "proxy-chain": "^2.4.0"
+  }
+}
