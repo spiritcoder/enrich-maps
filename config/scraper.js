@@ -3,30 +3,31 @@ require('dotenv').config();
 module.exports = {
   // Scraping configuration
   concurrent_scrapers: 5,
-  delay_between_requests: { min: 5000, max: 15000 },
+  delay_between_requests: { min: 8000, max: 20000 },
   max_retries: 3,
-  timeout: 30000,
+  timeout: 60000,
   
   // Google Maps selectors
   selectors: {
-    results: '[role="article"], .Nv2PK, [data-result-index]',
-    name: '.qBF1Pd, .fontHeadlineSmall, h3',
-    address: '.W4Efsd:nth-child(2), .W4Efsd .fontBodyMedium, [data-value="Address"]',
-    phone: '[data-value="Phone"], .UsdlK',
-    website: '[data-value="Website"] a, .CsEnBe a',
-    hours: '[data-value="Hours"], .t39EBf',
-    rating: '.MW4etd, .fontDisplayLarge',
-    reviews: '.UY7F9, .fontBodyMedium span',
-    images: 'img[src*="googleusercontent"], img[data-src*="googleusercontent"]'
+    // Search results page
+    results: 'a.hfpxzc, a[data-cid], div[role="article"] a, .Nv2PK a',
+    feed: 'div[role="feed"], div[role="main"] div[role="region"], .m6QErb[data-value="Search results"]',
+    
+    // Detail page selectors
+    name: 'h1[data-attrid="title"], h1.DUwDvf, h1',
+    category: 'button[jsaction*="category"], span.DkEaL, .YhemCb',
+    rating: 'div.jANrlb > div.fontDisplayLarge, span.ceNzKf',
+    reviews: 'div.jANrlb span[aria-label*="reviews"], .UY7F9, span.ceNzKf + span',
+    phone: 'button[data-item-id^="phone"], a[href^="tel:"], button[aria-label*="phone"]',
+    website: 'a[data-item-id^="authority"], button[data-item-id^="authority"]',
+    address: 'button[data-item-id^="address"], button[aria-label*="address"]',
+    images: 'button[data-photo-index] img, .ZKCDEc img, img[src*="googleusercontent"]'
   },
 
   // Search queries by priority
   queries: {
     primary: [
       'museums in {subdivision}, {country}',
-      'art galleries {subdivision} {country}',
-      'history museums {subdivision}',
-      'science museums {subdivision}'
     ],
     secondary: [
       'cultural centers {subdivision}',

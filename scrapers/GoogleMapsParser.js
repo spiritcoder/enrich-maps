@@ -1,7 +1,10 @@
-const puppeteer = require('puppeteer');
+const puppeteer = require('puppeteer-extra');
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const UserAgent = require('user-agents');
 const config = require('../config/scraper');
 const ProxyManager = require('../services/ProxyManager');
+
+puppeteer.use(StealthPlugin());
 
 class GoogleMapsParser {
   constructor(rateLimiter) {
@@ -29,7 +32,6 @@ class GoogleMapsParser {
     }
 
     this.browser = await puppeteer.launch({ 
-      headless: true, 
       args,
       ignoreDefaultArgs: ['--enable-automation']
     });
@@ -40,131 +42,66 @@ class GoogleMapsParser {
     const userAgent = new UserAgent();
     
     try {
-      // Authenticate if proxy is used
       const credentials = this.proxyManager.getCredentials();
       if (credentials) {
         await page.authenticate(credentials);
       }
       
       await page.setUserAgent(userAgent.toString());
-      await page.setViewport({ width: 1366, height: 768 });
-      
-      // Remove webdriver property
-      await page.evaluateOnNewDocument(() => {
-        Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-      });
+      await page.setViewport({ width: 1920, height: 1080 });
       
       await this.rateLimiter.wait();
       
       const searchUrl = `https://www.google.com/maps/search/${encodeURIComponent(query)}`;
-      await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: config.timeout });
+      await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
       
-      // Wait for results to load with multiple selectors
-      try {
-        await page.waitForSelector(config.selectors.results, { timeout: 15000 });
-      } catch (error) {
-        // Try alternative approach - wait for any content
-        await page.waitForTimeout(3000);
+      await page.waitForTimeout(5000);
+      
+      // Scroll to load more results
+      await this.scrollResults(page);
+      
+      // Extract business links
+      const links = await this.extractBusinessLinks(page);
+      
+      if (links.length === 0) {
         console.log(`No results found for: ${query}`);
+        return [];
       }
       
-      const museums = await page.evaluate((selectors) => {
-        const isMuseum = (name) => {
-          const museumKeywords = [
-            'museum', 'gallery', 'exhibition', 'art center', 'cultural center',
-            'heritage', 'history center', 'science center', 'planetarium',
-            'aquarium', 'zoo', 'botanical garden'
-          ];
-          
-          const excludeKeywords = [
-            'restaurant', 'hotel', 'shop', 'store', 'mall', 'parking',
-            'hospital', 'school', 'office', 'apartment'
-          ];
-          
-          const nameLower = name.toLowerCase();
-          
-          if (excludeKeywords.some(keyword => nameLower.includes(keyword))) {
-            return false;
-          }
-          
-          return museumKeywords.some(keyword => nameLower.includes(keyword));
-        };
-        
-        const extractCoordinates = (element) => {
-          const link = element.querySelector('a[href*="/@"]');
-          if (link) {
-            const match = link.href.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
-            if (match) {
-              return { lat: parseFloat(match[1]), lng: parseFloat(match[2]) };
-            }
-          }
-          return { lat: null, lng: null };
-        };
-        
-        const extractCategories = (element) => {
-          const spans = element.querySelectorAll('.W4Efsd span');
-          const categories = [];
-          spans.forEach(span => {
-            const text = span.textContent.trim();
-            if (text && !text.includes('·') && !text.includes('Open') && !text.includes('Closed')) {
-              categories.push(text);
-            }
-          });
-          return categories.slice(0, 3);
-        };
-        
-        const results = [];
-        const elements = document.querySelectorAll(selectors.results);
-        
-        elements.forEach((element, index) => {
-          if (index >= 20) return;
-          
-          const nameEl = element.querySelector(selectors.name);
-          const name = nameEl?.textContent?.trim();
-          
-          const addressSpans = element.querySelectorAll('.W4Efsd');
-          let address = '';
-          if (addressSpans.length > 1) {
-            address = addressSpans[1]?.textContent?.trim() || '';
-          }
-          
-          const phone = element.querySelector(selectors.phone)?.textContent?.trim();
-          const website = element.querySelector(selectors.website)?.href;
-          const rating = parseFloat(element.querySelector(selectors.rating)?.textContent?.trim());
-          const reviewText = element.querySelector(selectors.reviews)?.textContent?.trim();
-          const reviewCount = reviewText ? parseInt(reviewText.replace(/[^\d]/g, '')) : 0;
-          
-          const imageElements = element.querySelectorAll(selectors.images);
-          const images = Array.from(imageElements).slice(0, 5).map(img => img.src || img.dataset.src).filter(Boolean);
-          
-          const coords = extractCoordinates(element);
-          
-          if (name && isMuseum(name)) {
-            results.push({
-              name,
-              address: address || null,
-              phone: phone || null,
-              website: website || null,
-              rating: isNaN(rating) ? null : rating,
-              review_count: reviewCount,
-              images,
-              categories: extractCategories(element),
-              lat: coords.lat,
-              lng: coords.lng
-            });
-          }
-        });
-        
-        return results;
-      }, config.selectors);
+      console.log(`Found ${links.length} business links`);
       
-      // Add metadata
-      museums.forEach(museum => {
-        museum.country = country;
-        museum.subdivision = subdivision;
-        museum.source_url = searchUrl;
-        museum.scraped_at = new Date();
-      });
+      // Extract details from each business
+      const museums = [];
+      for (let i = 0; i < Math.min(links.length, 5); i++) {
+        try {
+          console.log(`Extracting business ${i + 1}/${Math.min(links.length, 5)}`);
+          const details = await this.extractBusinessDetails(links[i]);
+          
+          if (details && details.name) {
+            console.log(`Extracted: ${details.name}`);
+            
+            if (this.isMuseum(details.name)) {
+              details.country = country;
+              details.subdivision = subdivision;
+              details.source_url = searchUrl;
+              details.scraped_at = new Date();
+              museums.push(details);
+              console.log(`✓ Added museum: ${details.name}`);
+            } else {
+              console.log(`✗ Not a museum: ${details.name}`);
+            }
+          } else {
+            console.log(`✗ Failed to extract name from business ${i + 1}`);
+          }
+        } catch (error) {
+          console.error(`Error extracting business ${i + 1}:`, error.message);
+        }
+        
+        // Random delay between requests
+        if (i < Math.min(links.length, 5) - 1) {
+          await page.waitForTimeout(3000 + Math.random() * 2000);
+        }
+      }
       
       return museums;
       
@@ -176,7 +113,249 @@ class GoogleMapsParser {
     }
   }
 
+  async scrollResults(page) {
+    const feedSelectors = config.selectors.feed.split(', ');
+    
+    let feedElement = null;
+    for (const selector of feedSelectors) {
+      try {
+        feedElement = await page.$(selector);
+        if (feedElement) break;
+      } catch (err) {
+        continue;
+      }
+    }
+
+    for (let i = 0; i < 3; i++) {
+      try {
+        if (feedElement) {
+          await page.evaluate(el => {
+            el.scrollTop = el.scrollHeight;
+          }, feedElement);
+        } else {
+          await page.evaluate(() => {
+            window.scrollBy(0, 1000);
+          });
+        }
+        
+        await page.waitForTimeout(2000 + Math.random() * 1000);
+      } catch (err) {
+        console.error(`Scroll error ${i + 1}:`, err.message);
+      }
+    }
+  }
+
+  async extractBusinessLinks(page) {
+    const linkSelectors = config.selectors.results.split(', ');
+    
+    let links = [];
+    for (const selector of linkSelectors) {
+      try {
+        const foundLinks = await page.$$eval(selector, els => 
+          els.map(el => el.href).filter(href => href && href.includes('/maps/place/'))
+        );
+        if (foundLinks.length > 0) {
+          links = foundLinks;
+          break;
+        }
+      } catch (err) {
+        continue;
+      }
+    }
+    
+    return [...new Set(links)];
+  }
+
+  async extractBusinessDetails(link) {
+    const detailPage = await this.browser.newPage();
+    const details = {};
+    
+    try {
+      await detailPage.goto(link, { waitUntil: 'domcontentloaded', timeout: 60000 });
+      await detailPage.waitForTimeout(3000);
+      
+      // Extract name
+      const nameSelectors = config.selectors.name.split(', ');
+      for (const selector of nameSelectors) {
+        try {
+          const nameEl = await detailPage.$(selector);
+          if (nameEl) {
+            details.name = (await detailPage.evaluate(el => el.innerText, nameEl)).trim();
+            break;
+          }
+        } catch (err) {
+          continue;
+        }
+      }
+      
+      // Extract category
+      const categorySelectors = config.selectors.category.split(', ');
+      for (const selector of categorySelectors) {
+        try {
+          const catEl = await detailPage.$(selector);
+          if (catEl) {
+            const categoryText = (await detailPage.evaluate(el => el.innerText, catEl)).trim();
+            if (categoryText && !categoryText.includes('directions') && !categoryText.includes('call')) {
+              details.categories = [categoryText];
+              break;
+            }
+          }
+        } catch (err) {
+          continue;
+        }
+      }
+      
+      // Extract rating
+      const ratingSelectors = config.selectors.rating.split(', ');
+      for (const selector of ratingSelectors) {
+        try {
+          const ratingEl = await detailPage.$(selector);
+          if (ratingEl) {
+            const ratingText = (await detailPage.evaluate(el => el.innerText, ratingEl)).trim();
+            if (ratingText && /^\d+\.?\d*$/.test(ratingText)) {
+              details.rating = parseFloat(ratingText);
+              break;
+            }
+          }
+        } catch (err) {
+          continue;
+        }
+      }
+      
+      // Extract review count - try multiple approaches
+      details.review_count = 0;
+      
+      // Method 1: Look for review count in rating area
+      try {
+        const reviewText = await detailPage.evaluate(() => {
+          const ratingArea = document.querySelector('.jANrlb, .ceNzKf')?.parentElement;
+          if (ratingArea) {
+            const text = ratingArea.textContent || '';
+            const match = text.match(/([\d,]+)\s*reviews?/i);
+            return match ? match[1] : null;
+          }
+          return null;
+        });
+        
+        if (reviewText) {
+          details.review_count = parseInt(reviewText.replace(/,/g, ''));
+        }
+      } catch (err) {}
+      
+      // Method 2: Search entire page for review count if not found
+      if (details.review_count === 0) {
+        try {
+          const reviewCount = await detailPage.evaluate(() => {
+            const allText = document.body.textContent || '';
+            const matches = allText.match(/([\d,]+)\s*reviews?/gi);
+            if (matches && matches.length > 0) {
+              const numbers = matches.map(m => {
+                const num = m.match(/([\d,]+)/)[1];
+                return parseInt(num.replace(/,/g, ''));
+              });
+              return Math.max(...numbers);
+            }
+            return 0;
+          });
+          
+          details.review_count = reviewCount;
+        } catch (err) {}
+      }
+      
+      // Extract phone
+      const phoneSelectors = config.selectors.phone.split(', ');
+      for (const selector of phoneSelectors) {
+        try {
+          const phoneEl = await detailPage.$(selector);
+          if (phoneEl) {
+            let phoneText = await detailPage.evaluate(el => el.innerText || el.getAttribute('href'), phoneEl);
+            if (phoneText) {
+              if (phoneText.startsWith('tel:')) {
+                phoneText = phoneText.replace('tel:', '');
+              }
+              details.phone = phoneText.trim();
+              break;
+            }
+          }
+        } catch (err) {
+          continue;
+        }
+      }
+      
+      // Extract website
+      const websiteSelectors = config.selectors.website.split(', ');
+      for (const selector of websiteSelectors) {
+        try {
+          const websiteEl = await detailPage.$(selector);
+          if (websiteEl) {
+            const href = await detailPage.evaluate(el => el.href, websiteEl);
+            if (href && href.startsWith('http') && !href.includes('google.com')) {
+              details.website = href;
+              break;
+            }
+          }
+        } catch (err) {
+          continue;
+        }
+      }
+      
+      // Extract address
+      const addressSelectors = config.selectors.address.split(', ');
+      for (const selector of addressSelectors) {
+        try {
+          const addrEl = await detailPage.$(selector);
+          if (addrEl) {
+            details.address = (await detailPage.evaluate(el => el.innerText, addrEl)).trim();
+            break;
+          }
+        } catch (err) {
+          continue;
+        }
+      }
+      
+      // Extract coordinates from URL
+      const match = link.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
+      if (match) {
+        details.lat = parseFloat(match[1]);
+        details.lng = parseFloat(match[2]);
+      }
+      
+      // Extract images
+      const imageSelectors = config.selectors.images.split(', ');
+      const images = [];
+      for (const selector of imageSelectors) {
+        try {
+          const imageEls = await detailPage.$$(selector);
+          for (const imgEl of imageEls.slice(0, 5)) {
+            const src = await detailPage.evaluate(el => el.src || el.dataset.src, imgEl);
+            if (src && src.includes('googleusercontent') && !images.includes(src)) {
+              images.push(src);
+            }
+          }
+          if (images.length > 0) break;
+        } catch (err) {
+          continue;
+        }
+      }
+      details.images = images;
+      
+      if (!details.review_count) {
+        details.review_count = 0;
+      }
+      
+      return details;
+      
+    } catch (error) {
+      console.error(`Error extracting details from ${link}:`, error.message);
+      return null;
+    } finally {
+      await detailPage.close();
+    }
+  }
+
   isMuseum(name) {
+    if (!name) return false;
+    
     const museumKeywords = [
       'museum', 'gallery', 'exhibition', 'art center', 'cultural center',
       'heritage', 'history center', 'science center', 'planetarium',
@@ -190,19 +369,11 @@ class GoogleMapsParser {
     
     const nameLower = name.toLowerCase();
     
-    // Exclude non-museums
     if (excludeKeywords.some(keyword => nameLower.includes(keyword))) {
       return false;
     }
     
-    // Include museums
     return museumKeywords.some(keyword => nameLower.includes(keyword));
-  }
-
-  extractCategories(element) {
-    // Extract category information from the element
-    const categoryElement = element.querySelector('[data-attrid*="category"]');
-    return categoryElement ? [categoryElement.textContent.trim()] : [];
   }
 
   async close() {
