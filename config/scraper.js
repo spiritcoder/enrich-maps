@@ -32,7 +32,7 @@ module.exports = {
 
   // Proxy settings
   proxy: {
-    enabled: process.env.PROXY_STRING ? true : false,
+    enabled: process.env.PROXY_STRING == true ? true : false,
     // Format: username:password:host:port
     proxyString: process.env.PROXY_STRING || ''
   }

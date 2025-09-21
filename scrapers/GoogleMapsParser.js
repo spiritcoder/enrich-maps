@@ -39,7 +39,7 @@ class GoogleMapsParser {
     }
 
     this.browser = await puppeteer.launch({ 
-      headless: true,
+      headless: "new",
       args,
       ignoreDefaultArgs: ['--enable-automation'],
       defaultViewport: null
