@@ -453,6 +453,23 @@ class GoogleMapsParser {
       }
       details.images = images;
       
+      // Extract about/description
+      const aboutSelectors = config.selectors.about.split(', ');
+      for (const selector of aboutSelectors) {
+        try {
+          const aboutEl = await detailPage.$(selector);
+          if (aboutEl) {
+            const aboutText = (await detailPage.evaluate(el => el.innerText, aboutEl)).trim();
+            if (aboutText && aboutText.length > 20) {
+              details.about = aboutText;
+              break;
+            }
+          }
+        } catch (err) {
+          continue;
+        }
+      }
+      
       if (!details.review_count) {
         details.review_count = 0;
       }

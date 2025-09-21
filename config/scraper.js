@@ -21,7 +21,8 @@ module.exports = {
     phone: 'button[data-item-id^="phone"], a[href^="tel:"], button[aria-label*="phone"]',
     website: 'a[data-item-id^="authority"], button[data-item-id^="authority"]',
     address: 'button[data-item-id^="address"], button[aria-label*="address"]',
-    images: 'button[data-photo-index] img, .ZKCDEc img, img[src*="googleusercontent"]'
+    images: 'button[data-photo-index] img, .ZKCDEc img, img[src*="googleusercontent"]',
+    about: '.PYvSYb, .WeS02d .fontBodyMedium, .lMbq3e, .PbZDve, .fontBodyMedium'
   },
 
   // Primary search query
