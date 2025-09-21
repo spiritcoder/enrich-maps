@@ -14,17 +14,42 @@ class Database {
     this.db = this.client.db(this.dbName);
     
     // Create indexes
-    await this.db.collection('museums').createIndex({ name: 1 }, { unique: true });
     await this.db.collection('museums').createIndex({ slug: 1 }, { unique: true });
     await this.db.collection('museums').createIndex({ lat: 1, lng: 1 });
+    // Compound unique index for duplicate prevention
+    await this.db.collection('raw_museum_data').createIndex(
+      { name: 1, subdivision: 1, country: 1 }, 
+      { unique: true }
+    );
   }
 
   async insertRawData(data) {
-    const result = await this.db.collection('raw_museum_data').insertOne({
-      ...data,
-      scraped_at: new Date()
-    });
-    return result.insertedId;
+    // Normalize name for better duplicate detection
+    const normalizedName = data.name ? data.name.trim() : '';
+    
+    // Remove scraped_at from data to avoid conflict
+    const { scraped_at, ...dataWithoutScrapedAt } = data;
+    
+    const result = await this.db.collection('raw_museum_data').updateOne(
+      { 
+        name: normalizedName,
+        subdivision: data.subdivision,
+        country: data.country
+      },
+      {
+        $set: {
+          ...dataWithoutScrapedAt,
+          name: normalizedName,
+          updated_at: new Date()
+        },
+        $setOnInsert: {
+          scraped_at: new Date()
+        }
+      },
+      { upsert: true }
+    );
+    
+    return result.upsertedId || result.matchedCount;
   }
 
   async getRawDataBatch(limit = 100) {

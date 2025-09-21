@@ -153,8 +153,13 @@ class GoogleMapsParser {
               // Progressive saving - save immediately
               try {
                 const result = await this.saveMuseum(details);
-                savedCount++;
-                console.log(`✓ Saved museum ${savedCount}/${targetCount}: ${details.name} (ID: ${result})`);
+                if (result) {
+                  savedCount++;
+                  const action = typeof result === 'string' ? 'Saved' : 'Updated';
+                  console.log(`✓ ${action} museum ${savedCount}/${targetCount}: ${details.name}`);
+                } else {
+                  console.log(`↻ Duplicate skipped: ${details.name}`);
+                }
               } catch (saveError) {
                 console.error(`✗ Failed to save museum ${details.name}:`, saveError.message);
               }
