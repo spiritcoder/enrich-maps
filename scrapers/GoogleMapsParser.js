@@ -89,11 +89,19 @@ class GoogleMapsParser {
       // Wait for page to fully load before checking for errors
       await page.waitForTimeout(5000);
       
-      // Check for Google error pages only after full load
+      // Check for consent and error pages
       const pageContent = await page.content();
       const pageTitle = await page.title();
       
-      if (this.isErrorPage(pageContent, pageTitle)) {
+      if (this.isConsentPage(pageContent, pageTitle)) {
+        console.log(`🔒 Consent page detected, handling...`);
+        const handled = await this.handleConsentPage(page);
+        if (!handled) {
+          console.log(`❌ Failed to handle consent page`);
+          return [];
+        }
+        await page.waitForTimeout(3000);
+      } else if (this.isErrorPage(pageContent, pageTitle)) {
         const timestamp = Date.now();
         const screenshotPath = `screenshots/error_search_${timestamp}.png`;
         await page.screenshot({ path: screenshotPath, fullPage: true });
@@ -247,11 +255,19 @@ class GoogleMapsParser {
       // Wait for page to fully load before checking for errors
       await detailPage.waitForTimeout(3000);
       
-      // Check for error pages only after full load
+      // Check for consent and error pages
       const pageContent = await detailPage.content();
       const pageTitle = await detailPage.title();
       
-      if (this.isErrorPage(pageContent, pageTitle)) {
+      if (this.isConsentPage(pageContent, pageTitle)) {
+        console.log(`🔒 Consent page on detail page, handling...`);
+        const handled = await this.handleConsentPage(detailPage);
+        if (!handled) {
+          console.log(`❌ Failed to handle consent on detail page`);
+          return null;
+        }
+        await detailPage.waitForTimeout(3000);
+      } else if (this.isErrorPage(pageContent, pageTitle)) {
         const timestamp = Date.now();
         const screenshotPath = `screenshots/error_detail_${timestamp}.png`;
         await detailPage.screenshot({ path: screenshotPath, fullPage: true });
@@ -509,34 +525,79 @@ class GoogleMapsParser {
     return true;
   }
 
-  isErrorPage(content, title = '') {
-    // More specific error patterns to avoid false positives
-    const errorPatterns = [
+
+
+  isConsentPage(content, title = '') {
+    const contentLower = content.toLowerCase();
+    const titleLower = title.toLowerCase();
+    
+    // Very specific consent page patterns
+    const consentPatterns = [
       'before you continue to google',
+      'before you use google',
+      '繼續使用 google 之前',
+      'privacy and terms'
+    ];
+    
+    // Must have consent pattern AND accept/reject buttons
+    const hasConsentPattern = consentPatterns.some(pattern => 
+      contentLower.includes(pattern) || titleLower.includes(pattern)
+    );
+    
+    const hasConsentButtons = (contentLower.includes('accept') && contentLower.includes('reject')) ||
+                             (contentLower.includes('agree') && contentLower.includes('disagree'));
+    
+    return hasConsentPattern && hasConsentButtons;
+  }
+
+  async handleConsentPage(page) {
+    try {
+      // Look for accept button by common IDs first
+      const buttonIds = ['L2AGLb', 'W0wltc'];
+      for (const id of buttonIds) {
+        const button = await page.$(`#${id}`);
+        if (button) {
+          await button.click();
+          await page.waitForTimeout(2000);
+          return true;
+        }
+      }
+      
+      // Look for accept button by text
+      const buttons = await page.$$('button, div[role="button"]');
+      for (const button of buttons) {
+        const text = await page.evaluate(el => (el.textContent || '').toLowerCase(), button);
+        if (text.includes('accept all') || text.includes('i agree')) {
+          await button.click();
+          await page.waitForTimeout(2000);
+          return true;
+        }
+      }
+      
+      return false;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  isErrorPage(content, title = '') {
+    const errorPatterns = [
       'verify you\'re human',
       'unusual traffic from your computer network',
       'our systems have detected unusual traffic',
       'please complete the security check',
       'solve this captcha',
-      'access to this page has been denied'
+      'access to this page has been denied',
+      'suspicious activity'
     ];
     
-    // Check title for obvious error pages
     const titleLower = title.toLowerCase();
     if (titleLower.includes('access denied') || titleLower.includes('blocked') || titleLower.includes('captcha')) {
-      console.log(`🔍 Error detected in title: "${title}"`);
       return true;
     }
     
     const contentLower = content.toLowerCase();
-    const matchedPattern = errorPatterns.find(pattern => contentLower.includes(pattern));
-    
-    if (matchedPattern) {
-      console.log(`🔍 Error pattern matched: "${matchedPattern}"`);
-      return true;
-    }
-    
-    return false;
+    return errorPatterns.some(pattern => contentLower.includes(pattern));
   }
 
   async simulateHumanBehavior(page) {
