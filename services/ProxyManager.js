@@ -8,6 +8,8 @@ class ProxyManager {
   }
 
   async init() {
+    if (!config.proxy.enabled) return;
+    
     const proxyString = config.proxy.proxyString;
     if (!proxyString) return;
 
@@ -18,11 +20,11 @@ class ProxyManager {
   }
 
   getProxyUrl() {
-    return this.anonymizedProxy;
+    return config.proxy.enabled ? this.anonymizedProxy : null;
   }
 
   getCredentials() {
-    return this.credentials;
+    return config.proxy.enabled ? this.credentials : null;
   }
 
   async close() {
