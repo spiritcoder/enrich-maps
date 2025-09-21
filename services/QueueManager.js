@@ -38,6 +38,26 @@ class QueueManager {
     return result.insertedId;
   }
 
+  async claimNextJob(workerId) {
+    const result = await this.db.collection('scraping_jobs')
+      .findOneAndUpdate(
+        { status: 'pending' },
+        { 
+          $set: { 
+            status: 'processing',
+            worker_id: workerId,
+            started_at: new Date()
+          }
+        },
+        { 
+          returnDocument: 'after',
+          sort: { created_at: 1 }
+        }
+      );
+    
+    return result ? result : null;
+  }
+
   async getNextJobs(limit = 10) {
     return await this.db.collection('scraping_jobs')
       .find({ status: 'pending' })

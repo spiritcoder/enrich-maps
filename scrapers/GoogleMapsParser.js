@@ -25,15 +25,24 @@ class GoogleMapsParser {
       '--disable-features=VizDisplayCompositor',
       '--disable-blink-features=AutomationControlled',
       '--no-first-run',
-      '--disable-default-apps'
+      '--disable-default-apps',
+      '--disable-extensions',
+      '--disable-plugins',
+      '--disable-images',
+      '--disable-javascript-harmony-shipping',
+      '--disable-background-timer-throttling',
+      '--disable-backgrounding-occluded-windows',
+      '--disable-renderer-backgrounding'
     ];
     if (proxyUrl) {
       args.push(`--proxy-server=${proxyUrl}`);
     }
 
     this.browser = await puppeteer.launch({ 
+      headless: true,
       args,
-      ignoreDefaultArgs: ['--enable-automation']
+      ignoreDefaultArgs: ['--enable-automation'],
+      defaultViewport: null
     });
   }
 
@@ -47,15 +56,59 @@ class GoogleMapsParser {
         await page.authenticate(credentials);
       }
       
+      // Set realistic user agent and viewport
+      const viewports = [
+        { width: 1920, height: 1080 },
+        { width: 1366, height: 768 },
+        { width: 1440, height: 900 },
+        { width: 1536, height: 864 }
+      ];
+      const viewport = viewports[Math.floor(Math.random() * viewports.length)];
+      
       await page.setUserAgent(userAgent.toString());
-      await page.setViewport({ width: 1920, height: 1080 });
+      await page.setViewport(viewport);
+      
+      // Set realistic headers
+      await page.setExtraHTTPHeaders({
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Upgrade-Insecure-Requests': '1'
+      });
       
       await this.rateLimiter.wait();
       
       const searchUrl = `https://www.google.com/maps/search/${encodeURIComponent(query)}`;
-      await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+      await page.goto(searchUrl, { waitUntil: 'networkidle0', timeout: config.timeout });
       
+      // Wait for page to fully load before checking for errors
       await page.waitForTimeout(5000);
+      
+      // Check for Google error pages only after full load
+      const pageContent = await page.content();
+      const pageTitle = await page.title();
+      
+      if (this.isErrorPage(pageContent, pageTitle)) {
+        const timestamp = Date.now();
+        const screenshotPath = `screenshots/error_search_${timestamp}.png`;
+        await page.screenshot({ path: screenshotPath, fullPage: true });
+        
+        console.log(`❌ Google error page detected for: ${query}`);
+        console.log(`📸 Screenshot saved: ${screenshotPath}`);
+        console.log(`📄 Page title: ${pageTitle}`);
+        console.log(`🔗 URL: ${page.url()}`);
+        
+        return [];
+      }
+      
+      // Human-like behavior
+      await page.waitForTimeout(3000 + Math.random() * 4000);
+      await this.simulateHumanBehavior(page);
       
       // Scroll to load more results
       await this.scrollResults(page);
@@ -70,11 +123,14 @@ class GoogleMapsParser {
       
       console.log(`Found ${links.length} business links`);
       
-      // Extract details from each business
-      const museums = [];
-      for (let i = 0; i < Math.min(links.length, 5); i++) {
+      // Extract details from each business with progressive saving
+      const maxMuseums = config.max_museums_per_search;
+      const targetCount = Math.min(links.length, maxMuseums);
+      let savedCount = 0;
+      
+      for (let i = 0; i < targetCount; i++) {
         try {
-          console.log(`Extracting business ${i + 1}/${Math.min(links.length, 5)}`);
+          console.log(`Extracting business ${i + 1}/${targetCount}`);
           const details = await this.extractBusinessDetails(links[i]);
           
           if (details && details.name) {
@@ -85,8 +141,15 @@ class GoogleMapsParser {
               details.subdivision = subdivision;
               details.source_url = searchUrl;
               details.scraped_at = new Date();
-              museums.push(details);
-              console.log(`✓ Added museum: ${details.name}`);
+              
+              // Progressive saving - save immediately
+              try {
+                const result = await this.saveMuseum(details);
+                savedCount++;
+                console.log(`✓ Saved museum ${savedCount}/${targetCount}: ${details.name} (ID: ${result})`);
+              } catch (saveError) {
+                console.error(`✗ Failed to save museum ${details.name}:`, saveError.message);
+              }
             } else {
               console.log(`✗ Not a museum: ${details.name}`);
             }
@@ -97,13 +160,15 @@ class GoogleMapsParser {
           console.error(`Error extracting business ${i + 1}:`, error.message);
         }
         
-        // Random delay between requests
-        if (i < Math.min(links.length, 5) - 1) {
-          await page.waitForTimeout(3000 + Math.random() * 2000);
+        // Human-like delay between requests
+        if (i < targetCount - 1) {
+          const delay = 8000 + Math.random() * 12000; // 8-20 seconds
+          console.log(`⏳ Waiting ${Math.round(delay/1000)}s before next museum...`);
+          await page.waitForTimeout(delay);
         }
       }
       
-      return museums;
+      return savedCount;
       
     } catch (error) {
       console.error(`Error scraping ${query}:`, error.message);
@@ -171,8 +236,36 @@ class GoogleMapsParser {
     const details = {};
     
     try {
-      await detailPage.goto(link, { waitUntil: 'domcontentloaded', timeout: 60000 });
+      // Set headers for detail page
+      await detailPage.setExtraHTTPHeaders({
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Referer': 'https://www.google.com/maps/'
+      });
+      
+      await detailPage.goto(link, { waitUntil: 'networkidle0', timeout: config.timeout });
+      
+      // Wait for page to fully load before checking for errors
       await detailPage.waitForTimeout(3000);
+      
+      // Check for error pages only after full load
+      const pageContent = await detailPage.content();
+      const pageTitle = await detailPage.title();
+      
+      if (this.isErrorPage(pageContent, pageTitle)) {
+        const timestamp = Date.now();
+        const screenshotPath = `screenshots/error_detail_${timestamp}.png`;
+        await detailPage.screenshot({ path: screenshotPath, fullPage: true });
+        
+        console.log(`❌ Error page detected on detail page`);
+        console.log(`📸 Screenshot saved: ${screenshotPath}`);
+        console.log(`📄 Page title: ${pageTitle}`);
+        console.log(`🔗 URL: ${detailPage.url()}`);
+        
+        return null;
+      }
+      
+      await detailPage.waitForTimeout(2000 + Math.random() * 3000);
+      await this.simulateHumanBehavior(detailPage);
       
       // Extract name
       const nameSelectors = config.selectors.name.split(', ');
@@ -414,6 +507,70 @@ class GoogleMapsParser {
     // Step 5: Trust Google's search results (fallback)
     // Since we're searching for "museums in [location]", accept anything that passes exclusion
     return true;
+  }
+
+  isErrorPage(content, title = '') {
+    // More specific error patterns to avoid false positives
+    const errorPatterns = [
+      'before you continue to google',
+      'verify you\'re human',
+      'unusual traffic from your computer network',
+      'our systems have detected unusual traffic',
+      'please complete the security check',
+      'solve this captcha',
+      'access to this page has been denied'
+    ];
+    
+    // Check title for obvious error pages
+    const titleLower = title.toLowerCase();
+    if (titleLower.includes('access denied') || titleLower.includes('blocked') || titleLower.includes('captcha')) {
+      console.log(`🔍 Error detected in title: "${title}"`);
+      return true;
+    }
+    
+    const contentLower = content.toLowerCase();
+    const matchedPattern = errorPatterns.find(pattern => contentLower.includes(pattern));
+    
+    if (matchedPattern) {
+      console.log(`🔍 Error pattern matched: "${matchedPattern}"`);
+      return true;
+    }
+    
+    return false;
+  }
+
+  async simulateHumanBehavior(page) {
+    try {
+      // Random scroll
+      await page.evaluate(() => {
+        window.scrollBy(0, Math.random() * 300 + 100);
+      });
+      
+      await page.waitForTimeout(500 + Math.random() * 1000);
+      
+      // Random mouse movement
+      const viewport = page.viewport();
+      await page.mouse.move(
+        Math.random() * viewport.width,
+        Math.random() * viewport.height
+      );
+      
+      await page.waitForTimeout(300 + Math.random() * 700);
+    } catch (error) {
+      // Ignore errors in human simulation
+    }
+  }
+
+  async saveMuseum(museumData) {
+    // This will be injected by the master scraper
+    if (this.database) {
+      return await this.database.insertRawData(museumData);
+    }
+    throw new Error('Database not available for saving');
+  }
+
+  setDatabase(database) {
+    this.database = database;
   }
 
   async close() {

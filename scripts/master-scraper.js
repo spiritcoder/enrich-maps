@@ -33,6 +33,7 @@ class MasterScraper {
 
     for (let i = 0; i < config.concurrent_scrapers; i++) {
       const scraper = new GoogleMapsParser(this.rateLimiter);
+      scraper.setDatabase(this.db);
       await scraper.init();
       this.scrapers.push(scraper);
     }
@@ -58,38 +59,24 @@ class MasterScraper {
   async runWorker(scraper, workerId) {
     while (this.isRunning) {
       try {
-        const jobs = await this.queueManager.getNextJobs(1);
-        if (jobs.length === 0) {
+        const job = await this.queueManager.claimNextJob(workerId);
+        if (!job) {
           console.log(`Worker ${workerId}: No more jobs, waiting...`);
           await new Promise(resolve => setTimeout(resolve, 10000));
           continue;
         }
 
-        const job = jobs[0];
         console.log(`Worker ${workerId}: Processing ${job.query}`);
         
-        await this.queueManager.updateJobStatus(job._id, 'processing');
+        const savedCount = await scraper.scrapeMuseums(job.query, job.country, job.subdivision);
         
-        const museums = await scraper.scrapeMuseums(job.query, job.country, job.subdivision);
-        
-        // Save raw data
-        console.log(`Saving ${museums.length} museums to database...`);
-        for (const museum of museums) {
-          try {
-            const result = await this.db.insertRawData(museum);
-            console.log(`Saved museum: ${museum.name} with ID: ${result}`);
-          } catch (error) {
-            console.error(`Error saving museum ${museum.name}:`, error.message);
-          }
-        }
-
-        await this.queueManager.updateJobStatus(job._id, 'completed', museums.length);
-        console.log(`Worker ${workerId}: Completed ${job.query} - Found ${museums.length} museums`);
+        await this.queueManager.updateJobStatus(job._id, 'completed', savedCount);
+        console.log(`Worker ${workerId}: Completed ${job.query} - Saved ${savedCount} museums`);
 
       } catch (error) {
         console.error(`Worker ${workerId} error:`, error.message);
-        if (jobs && jobs[0]) {
-          await this.queueManager.updateJobStatus(jobs[0]._id, 'failed');
+        if (job) {
+          await this.queueManager.updateJobStatus(job._id, 'failed');
         }
         await new Promise(resolve => setTimeout(resolve, 5000));
       }

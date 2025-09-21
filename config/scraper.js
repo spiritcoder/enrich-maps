@@ -3,9 +3,9 @@ require('dotenv').config();
 module.exports = {
   // Scraping configuration
   concurrent_scrapers: 5,
-  delay_between_requests: { min: 8000, max: 20000 },
+  delay_between_requests: { min: 12000, max: 25000 },
   max_retries: 3,
-  timeout: 60000,
+  timeout: 90000,
   
   // Google Maps selectors
   selectors: {
@@ -26,6 +26,9 @@ module.exports = {
 
   // Primary search query
   primary_query: 'museums in {subdivision}, {country}',
+  
+  // Maximum museums to process per search
+  max_museums_per_search: parseInt(process.env.MAX_MUSEUMS_PER_SEARCH) || 100,
 
   // Proxy settings
   proxy: {
