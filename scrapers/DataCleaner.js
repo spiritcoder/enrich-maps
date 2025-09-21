@@ -1,15 +1,16 @@
 class DataCleaner {
   static cleanMuseumData(rawData) {
+    const cleanedName = this.cleanName(rawData.name);
     return {
-      name: this.cleanName(rawData.name),
-      slug: this.generateSlug(rawData.name),
+      name: cleanedName,
+      slug: this.generateSlug(cleanedName, rawData._id),
       address: this.cleanAddress(rawData.address),
       phone: this.cleanPhone(rawData.phone),
       website: this.cleanWebsite(rawData.website),
       hours: this.cleanHours(rawData.hours),
       rating: this.validateRating(rawData.rating),
       review_count: this.validateReviewCount(rawData.review_count),
-      type: this.categorizeMuseum(rawData.name, rawData.categories),
+      type: this.categorizeMuseum(cleanedName, rawData.categories),
       lat: this.validateCoordinate(rawData.lat, 'lat'),
       lng: this.validateCoordinate(rawData.lng, 'lng'),
       images: this.cleanImages(rawData.images),
@@ -23,14 +24,25 @@ class DataCleaner {
     return name.trim().replace(/\s+/g, ' ').substring(0, 200);
   }
 
-  static generateSlug(name) {
-    if (!name) return null;
-    return name.toLowerCase()
+  static generateSlug(name, fallbackId = null) {
+    if (!name || name.trim() === '') {
+      return fallbackId ? `museum-${fallbackId.toString().slice(-8)}` : `museum-${Date.now()}`;
+    }
+    
+    let slug = name.toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
       .replace(/[^a-z0-9\s-]/g, '')
       .replace(/\s+/g, '-')
       .replace(/-+/g, '-')
-      .trim('-')
-      .substring(0, 100);
+      .replace(/^-+|-+$/g, '')
+      .substring(0, 80);
+    
+    if (!slug || slug === '' || slug === '-') {
+      return fallbackId ? `museum-${fallbackId.toString().slice(-8)}` : `museum-${Date.now()}`;
+    }
+    
+    return slug;
   }
 
   static cleanAddress(address) {
@@ -118,8 +130,7 @@ class DataCleaner {
 
   static isValidMuseum(data) {
     // Basic validation rules
-    if (!data.name || data.name.length < 3) return false;
-    if (!data.address && !data.lat && !data.lng) return false;
+    if (!data.name || data.name.length < 2) return false;
     
     // Check if it's actually a museum
     const excludeKeywords = [

@@ -24,23 +24,8 @@ module.exports = {
     images: 'button[data-photo-index] img, .ZKCDEc img, img[src*="googleusercontent"]'
   },
 
-  // Search queries by priority
-  queries: {
-    primary: [
-      'museums in {subdivision}, {country}',
-    ],
-    secondary: [
-      'cultural centers {subdivision}',
-      'exhibition halls {subdivision}',
-      'heritage sites {subdivision}'
-    ]
-  },
-
-  // Country processing priority
-  priority_countries: [
-    'United States', 'United Kingdom', 'Germany', 'France', 'Canada',
-    'Italy', 'Spain', 'Netherlands', 'Australia', 'Japan'
-  ],
+  // Primary search query
+  primary_query: 'museums in {subdivision}, {country}',
 
   // Proxy settings
   proxy: {

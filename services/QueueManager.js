@@ -16,49 +16,13 @@ class QueueManager {
 
   async generateJobs() {
     const countriesData = require('../countries_subdivisions.json');
-    const priorityCountries = config.priority_countries;
     
-    // Group subdivisions by country
-    const countries = {};
     for (const item of countriesData) {
-      if (!countries[item.country_name]) {
-        countries[item.country_name] = [];
-      }
-      countries[item.country_name].push(item.subdivision_name);
-    }
-    
-    const sortedCountries = Object.keys(countries).sort((a, b) => {
-      const aIndex = priorityCountries.indexOf(a);
-      const bIndex = priorityCountries.indexOf(b);
+      const query = config.primary_query
+        .replace('{subdivision}', item.subdivision_name)
+        .replace('{country}', item.country_name);
       
-      if (aIndex === -1 && bIndex === -1) return a.localeCompare(b);
-      if (aIndex === -1) return 1;
-      if (bIndex === -1) return -1;
-      return aIndex - bIndex;
-    });
-
-    for (const country of sortedCountries) {
-      const subdivisions = countries[country];
-      
-      for (const subdivision of subdivisions) {
-        for (const queryTemplate of config.queries.primary) {
-          const query = queryTemplate
-            .replace('{subdivision}', subdivision)
-            .replace('{country}', country);
-          
-          await this.addJob(country, subdivision, query);
-        }
-        
-        if (priorityCountries.includes(country)) {
-          for (const queryTemplate of config.queries.secondary) {
-            const query = queryTemplate
-              .replace('{subdivision}', subdivision)
-              .replace('{country}', country);
-            
-            await this.addJob(country, subdivision, query);
-          }
-        }
-      }
+      await this.addJob(item.country_name, item.subdivision_name, query);
     }
   }
 

@@ -80,7 +80,7 @@ class GoogleMapsParser {
           if (details && details.name) {
             console.log(`Extracted: ${details.name}`);
             
-            if (this.isMuseum(details.name)) {
+            if (this.isMuseum(details.name, details.categories)) {
               details.country = country;
               details.subdivision = subdivision;
               details.source_url = searchUrl;
@@ -353,18 +353,51 @@ class GoogleMapsParser {
     }
   }
 
-  isMuseum(name) {
+  isMuseum(name, categories = []) {
     if (!name) return false;
     
-    const museumKeywords = [
-      'museum', 'gallery', 'exhibition', 'art center', 'cultural center',
-      'heritage', 'history center', 'science center', 'planetarium',
-      'aquarium', 'zoo', 'botanical garden'
+    // Step 1: Check categories first (most reliable)
+    const museumCategories = [
+      'museum', 'art museum', 'history museum', 'science museum', 'natural history museum',
+      'gallery', 'art gallery', 'exhibition', 'cultural center', 'heritage center',
+      'planetarium', 'aquarium', 'zoo', 'botanical garden', 'art center'
     ];
     
+    if (categories && categories.length > 0) {
+      const categoryText = categories.join(' ').toLowerCase();
+      if (museumCategories.some(cat => categoryText.includes(cat))) {
+        return true;
+      }
+    }
+    
+    // Step 2: Multi-language name keywords
+    const museumKeywords = [
+      // English
+      'museum', 'gallery', 'exhibition', 'art center', 'cultural center',
+      'heritage', 'history center', 'science center', 'planetarium',
+      'aquarium', 'zoo', 'botanical garden',
+      // French
+      'musée', 'galerie', 'exposition', 'centre culturel',
+      // German
+      'museum', 'galerie', 'ausstellung', 'kulturzentrum',
+      // Spanish
+      'museo', 'galería', 'exposición', 'centro cultural',
+      // Italian
+      'museo', 'galleria', 'mostra', 'centro culturale',
+      // Portuguese
+      'museu', 'galeria', 'centro cultural',
+      // Dutch
+      'museum', 'galerij', 'tentoonstelling',
+      // Japanese
+      '博物館', '美術館', 'ギャラリー',
+      // Chinese
+      '博物馆', '美术馆', '画廊'
+    ];
+    
+    // Step 3: Exclude non-museums
     const excludeKeywords = [
       'restaurant', 'hotel', 'shop', 'store', 'mall', 'parking',
-      'hospital', 'school', 'office', 'apartment'
+      'hospital', 'school', 'office', 'apartment', 'bank', 'pharmacy'
     ];
     
     const nameLower = name.toLowerCase();
@@ -373,7 +406,14 @@ class GoogleMapsParser {
       return false;
     }
     
-    return museumKeywords.some(keyword => nameLower.includes(keyword));
+    // Step 4: Check name against multi-language keywords
+    if (museumKeywords.some(keyword => nameLower.includes(keyword))) {
+      return true;
+    }
+    
+    // Step 5: Trust Google's search results (fallback)
+    // Since we're searching for "museums in [location]", accept anything that passes exclusion
+    return true;
   }
 
   async close() {

@@ -32,6 +32,11 @@ class DataProcessor {
       }
       
       console.log(`📊 Processed: ${this.processed}, Duplicates: ${this.duplicates}, Invalid: ${this.invalid}`);
+      
+      // Add some delay to avoid overwhelming the database
+      if (this.processed % 50 === 0) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
     }
     
     console.log('✅ Data processing completed!');
@@ -56,20 +61,15 @@ class DataProcessor {
   }
 
   async isDuplicate(data) {
+    // Only check for exact name matches in same location
+    if (!data.name || !data.country || !data.subdivision) {
+      return false;
+    }
+    
     const query = {
-      $or: [
-        { name: data.name },
-        {
-          lat: { $exists: true, $ne: null },
-          lng: { $exists: true, $ne: null },
-          $expr: {
-            $and: [
-              { $lt: [{ $abs: { $subtract: ['$lat', data.lat] } }, 0.001] },
-              { $lt: [{ $abs: { $subtract: ['$lng', data.lng] } }, 0.001] }
-            ]
-          }
-        }
-      ]
+      name: data.name,
+      country: data.country,
+      subdivision: data.subdivision
     };
     
     const existing = await this.db.collection('museums').findOne(query);
@@ -77,12 +77,29 @@ class DataProcessor {
   }
 
   async insertMuseum(data, rawId) {
-    const result = await this.db.collection('museums').insertOne({
-      ...data,
-      raw_id: rawId,
-      created_at: new Date()
-    });
-    return result.insertedId;
+    let attempts = 0;
+    const maxAttempts = 3;
+    
+    while (attempts < maxAttempts) {
+      try {
+        const result = await this.db.collection('museums').insertOne({
+          ...data,
+          raw_id: rawId,
+          created_at: new Date()
+        });
+        return result.insertedId;
+      } catch (error) {
+        if (error.code === 11000 && error.message.includes('slug_1')) {
+          // Duplicate slug, add random suffix
+          data.slug = `${data.slug}-${Math.random().toString(36).substr(2, 6)}`;
+          attempts++;
+        } else {
+          throw error;
+        }
+      }
+    }
+    
+    throw new Error(`Failed to insert museum after ${maxAttempts} attempts`);
   }
 }
 
