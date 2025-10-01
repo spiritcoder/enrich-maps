@@ -13,10 +13,22 @@ class Database {
     await this.client.connect();
     this.db = this.client.db(this.dbName);
     
+    // Drop old problematic indexes
+    try {
+      await this.db.collection('museums').dropIndex('name_1');
+      console.log('✓ Dropped old name_1 index');
+    } catch (e) {
+      // Index might not exist, ignore error
+    }
+    
     // Create indexes
     await this.db.collection('museums').createIndex({ slug: 1 }, { unique: true });
     await this.db.collection('museums').createIndex({ lat: 1, lng: 1 });
-    // Compound unique index for duplicate prevention
+    // Performance indexes (non-unique)
+    await this.db.collection('museums').createIndex({ phone: 1, country: 1 });
+    await this.db.collection('museums').createIndex({ website: 1, country: 1 });
+    await this.db.collection('museums').createIndex({ name: 1, subdivision: 1, country: 1 });
+    // Compound unique index for raw data duplicate prevention
     await this.db.collection('raw_museum_data').createIndex(
       { name: 1, subdivision: 1, country: 1 }, 
       { unique: true }
@@ -52,15 +64,7 @@ class Database {
     return result.upsertedId || result.matchedCount;
   }
 
-  async getRawDataBatch(limit = 100) {
-    const processedIds = await this.db.collection('museums')
-      .distinct('raw_id', { raw_id: { $exists: true } });
-    
-    return await this.db.collection('raw_museum_data')
-      .find({ _id: { $nin: processedIds } })
-      .limit(limit)
-      .toArray();
-  }
+
 
   async close() {
     if (this.client) {
