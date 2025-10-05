@@ -33,6 +33,7 @@ class ExcelExporter {
       Subdivision: museum.subdivision,
       Latitude: museum.lat,
       Longitude: museum.lng,
+      Images: museum.images ? museum.images.join(', ') : '',
       About: museum.about,
       Created: museum.created_at
     }));
