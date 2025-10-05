@@ -1,12 +1,11 @@
-const Database = require('../config/database');
-const config = require('../config/scraper');
+const GenericDatabase = require('../config/database-generic');
+const NicheLoader = require('../config/niche-loader');
 
-class QueueManager {
-  constructor() {
-    this.database = new Database();
+class GenericQueueManager {
+  constructor(niche = null) {
+    this.niche = niche || NicheLoader.getCurrentNiche();
+    this.database = new GenericDatabase(this.niche);
     this.db = null;
-    this.queue = [];
-    this.processing = false;
   }
 
   async init() {
@@ -18,16 +17,16 @@ class QueueManager {
     const countriesData = require('../countries_subdivisions.json');
     
     for (const item of countriesData) {
-      const query = config.primary_query
-        .replace('{subdivision}', item.subdivision_name)
-        .replace('{country}', item.country_name);
-      
-      await this.addJob(item.country_name, item.subdivision_name, query);
+      for (const searchTerm of this.niche.search.terms) {
+        const query = `${searchTerm} ${item.subdivision_name}, ${item.country_name}`;
+        await this.addJob(item.country_name, item.subdivision_name, query);
+      }
     }
   }
 
   async addJob(country, subdivision, query) {
-    const result = await this.db.collection('scraping_jobs').insertOne({
+    const collections = this.niche.database.collections;
+    const result = await this.db.collection(collections.jobs).insertOne({
       country,
       subdivision,
       query,
@@ -39,7 +38,8 @@ class QueueManager {
   }
 
   async claimNextJob(workerId) {
-    const result = await this.db.collection('scraping_jobs')
+    const collections = this.niche.database.collections;
+    const result = await this.db.collection(collections.jobs)
       .findOneAndUpdate(
         { status: 'pending' },
         { 
@@ -58,14 +58,8 @@ class QueueManager {
     return result ? result : null;
   }
 
-  async getNextJobs(limit = 10) {
-    return await this.db.collection('scraping_jobs')
-      .find({ status: 'pending' })
-      .limit(limit)
-      .toArray();
-  }
-
   async updateJobStatus(jobId, status, resultsCount = 0) {
+    const collections = this.niche.database.collections;
     const updateData = { status };
     
     if (status === 'completed') {
@@ -75,11 +69,12 @@ class QueueManager {
       updateData.started_at = new Date();
     }
     
-    return await this.db.collection('scraping_jobs')
+    return await this.db.collection(collections.jobs)
       .updateOne({ _id: jobId }, { $set: updateData });
   }
 
   async getProgress() {
+    const collections = this.niche.database.collections;
     const pipeline = [
       {
         $group: {
@@ -88,14 +83,14 @@ class QueueManager {
           completed: { $sum: { $cond: [{ $eq: ['$status', 'completed'] }, 1, 0] } },
           processing: { $sum: { $cond: [{ $eq: ['$status', 'processing'] }, 1, 0] } },
           failed: { $sum: { $cond: [{ $eq: ['$status', 'failed'] }, 1, 0] } },
-          total_museums: { $sum: '$results_count' }
+          total_businesses: { $sum: '$results_count' }
         }
       }
     ];
     
-    const result = await this.db.collection('scraping_jobs').aggregate(pipeline).toArray();
-    return result[0] || { total: 0, completed: 0, processing: 0, failed: 0, total_museums: 0 };
+    const result = await this.db.collection(collections.jobs).aggregate(pipeline).toArray();
+    return result[0] || { total: 0, completed: 0, processing: 0, failed: 0, total_businesses: 0 };
   }
 }
 
-module.exports = QueueManager;
+module.exports = GenericQueueManager;

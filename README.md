@@ -1,16 +1,15 @@
-# Museum Scraper System
+# Generic Business Scraper System
 
-Global museum scraping system designed to collect comprehensive museum data from Google Maps for SEO and directory purposes.
+Universal business scraping framework designed to collect comprehensive business data from Google Maps for any niche (museums, restaurants, tattoo shops, etc.).
 
 ## Architecture Overview
 
 ```
-museum-scraper/
-├── config/           # Configuration files
+terminal-scraper/
+├── config/           # Generic configuration system
+├── niches/           # Business type configurations
 ├── scrapers/         # Core scraping logic
 ├── services/         # Supporting services
-├── models/           # Data models
-├── utils/            # Utility functions
 └── scripts/          # Main execution scripts
 ```
 
@@ -21,89 +20,163 @@ museum-scraper/
 npm install
 ```
 
-2. **Start Scraping**
+2. **Start Scraping** (specify niche)
 ```bash
-npm start
+node scripts/scrape-niche.js museums
+node scripts/scrape-niche.js tattoo
+node scripts/scrape-niche.js restaurants
 ```
 
 3. **Process Raw Data**
 ```bash
-npm run process
+node scripts/process-niche.js museums
 ```
 
-4. **Monitor Progress**
+4. **Export to Excel**
 ```bash
-npm run validate
+node scripts/export-niche.js museums
+```
+
+5. **Monitor Progress**
+```bash
+node scripts/validate-niche.js museums
 ```
 
 ## Key Features
 
+- **Multi-Niche Support**: Museums, restaurants, tattoo shops, or any business type
+- **Configuration-Based**: Add new business types with simple JSON configs
 - **Multi-threaded Scraping**: 5 concurrent scrapers
-- **Smart Rate Limiting**: 2-8 second delays between requests
-- **Museum Detection**: AI-powered filtering of non-museums
-- **Duplicate Prevention**: Location and name-based deduplication
-- **Data Cleaning**: Standardization and validation
-- **Progress Tracking**: Real-time monitoring dashboard
+- **Smart Rate Limiting**: 12-25 second delays between requests
+- **Business Validation**: Niche-specific filtering and validation rules
+- **Duplicate Prevention**: Address, phone, and name-based deduplication
+- **Data Cleaning**: Unicode normalization and standardization
+- **Quality Filtering**: Rating and review thresholds per niche
 
-## Expected Results
+## Supported Business Types
 
-- **Volume**: 50,000-100,000 museums globally
-- **Speed**: 500-1,000 museums per day
-- **Timeline**: 3-4 months for complete coverage
-- **Quality**: 95%+ accuracy with manual validation triggers
+- **Museums**: Art, history, science, cultural institutions
+- **Restaurants**: All cuisine types and dining establishments  
+- **Tattoo Shops**: Tattoo studios and body art businesses
+- **Custom**: Add any business type with JSON configuration
 
 ## Database Schema
 
-### Raw Data Table
+Each niche uses separate MongoDB databases:
+
+### Raw Data Collection
 - Stores unprocessed scraped data
 - Includes source URLs and timestamps
 - No validation at this stage
 
-### Museums Table
-- Clean, validated museum data
+### Processed Business Collection
+- Clean, validated business data
 - SEO-optimized slugs
-- Categorized by museum type
+- Categorized by business type
 - Geocoded coordinates
+- Contact information
 
-### Jobs Table
-- Tracks scraping progress
+### Jobs Collection
+- Tracks scraping progress by country/subdivision
 - Manages queue and retries
 - Performance monitoring
 
-## Configuration
+## Adding New Business Types
 
-Edit `config/scraper.js` to adjust:
-- Concurrent scraper count
-- Request delays
-- Search queries
-- Country priorities
+Create a new JSON file in `niches/` directory:
+
+```json
+{
+  "name": "your_niche",
+  "database": {
+    "name": "your_niche_scraper",
+    "collections": {
+      "raw": "raw_data",
+      "processed": "businesses",
+      "jobs": "scraping_jobs"
+    }
+  },
+  "search": {
+    "terms": ["your business type in"],
+    "maxPerSearch": 100
+  },
+  "validation": {
+    "includeKeywords": ["relevant", "keywords"],
+    "excludeKeywords": ["exclude", "these"],
+    "minRating": 4.0,
+    "minReviews": 5
+  },
+  "categories": {
+    "Type1": ["keyword1", "keyword2"],
+    "Type2": ["keyword3", "keyword4"]
+  }
+}
+```
+
+## Environment Configuration
+
+Copy `.env.example` to `.env` and configure:
+
+```bash
+NICHE=museums                    # Default niche to use
+MAX_MUSEUMS_PER_SEARCH=100      # Businesses per search
+PROXY_STRING=user:pass:host:port # Optional proxy
+MONGODB_URI=mongodb://localhost:27017
+```
+
+## Available Commands
+
+```bash
+# Scrape businesses for a niche
+node scripts/scrape-niche.js <niche-name>
+
+# Process raw data into clean records
+node scripts/process-niche.js <niche-name>
+
+# Export to Excel spreadsheet
+node scripts/export-niche.js <niche-name>
+
+# Validate data quality and progress
+node scripts/validate-niche.js <niche-name>
+```
+
+## Example Usage
+
+```bash
+# Scrape tattoo shops
+node scripts/scrape-niche.js tattoo
+
+# Process the raw tattoo data
+node scripts/process-niche.js tattoo
+
+# Export tattoo shops to Excel
+node scripts/export-niche.js tattoo
+
+# Check tattoo scraping progress
+node scripts/validate-niche.js tattoo
+```
 
 ## Legal Compliance
 
-- Respects rate limits
-- Reasonable request delays
+- Respects rate limits (12-25 second delays)
+- Reasonable request patterns
 - No server overloading
-- Attribution where required
-
-## Monitoring
-
-The system provides real-time progress updates:
-- Jobs completed/remaining
-- Museums found per country
-- Error rates and retries
-- Estimated completion time
+- Stealth measures to avoid detection
 
 ## Data Quality
 
-Automated validation includes:
+Automated validation per niche:
+- Business type validation using keywords
+- Rating and review thresholds
+- Contact information requirements
 - Coordinate validation
-- Phone number formatting
-- Website accessibility
-- Image quality checks
-- Duplicate detection
+- Unicode character cleaning
+- Address-based duplicate detection
 
-Manual review triggers for:
-- Museums without contact info
-- Unusual coordinate locations
-- Special character names
-- Flagged duplicates
+## Monitoring
+
+Real-time progress tracking:
+- Jobs completed/remaining per country
+- Businesses found and processed
+- Validation pass/fail rates
+- Duplicate detection statistics

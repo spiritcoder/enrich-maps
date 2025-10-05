@@ -1,20 +1,21 @@
-const GoogleMapsParser = require('../scrapers/GoogleMapsParser');
+const GenericGoogleMapsParser = require('../scrapers/GenericGoogleMapsParser');
 const RateLimiter = require('../services/RateLimiter');
-const QueueManager = require('../services/QueueManager');
-const Database = require('../config/database');
-const config = require('../config/scraper');
+const GenericQueueManager = require('../services/GenericQueueManager');
+const GenericDatabase = require('../config/database-generic');
+const NicheLoader = require('../config/niche-loader');
 
-class MasterScraper {
-  constructor() {
-    this.db = new Database();
-    this.queueManager = new QueueManager();
+class GenericMasterScraper {
+  constructor(niche = null) {
+    this.niche = niche || NicheLoader.getCurrentNiche();
+    this.db = new GenericDatabase(this.niche);
+    this.queueManager = new GenericQueueManager(this.niche);
     this.rateLimiter = new RateLimiter();
     this.scrapers = [];
     this.isRunning = false;
   }
 
   async init() {
-    console.log('🚀 Initializing Museum Scraper...');
+    console.log(`🚀 Initializing ${this.niche.name} scraper...`);
     
     console.log('📊 Connecting to MongoDB...');
     await this.db.init();
@@ -31,8 +32,9 @@ class MasterScraper {
       console.log(`✅ Generated ${(await this.queueManager.getProgress()).total} scraping jobs`);
     }
 
-    for (let i = 0; i < config.concurrent_scrapers; i++) {
-      const scraper = new GoogleMapsParser(this.rateLimiter);
+    const concurrentScrapers = process.env.CONCURRENT_SCRAPERS || 5;
+    for (let i = 0; i < concurrentScrapers; i++) {
+      const scraper = new GenericGoogleMapsParser(this.rateLimiter, this.niche);
       scraper.setDatabase(this.db);
       await scraper.init();
       this.scrapers.push(scraper);
@@ -43,15 +45,13 @@ class MasterScraper {
 
   async start() {
     this.isRunning = true;
-    console.log('🏃 Starting museum scraping...');
+    console.log(`🏃 Starting ${this.niche.name} scraping...`);
     
     const workers = this.scrapers.map((scraper, index) => 
       this.runWorker(scraper, index)
     );
 
-    // Progress monitoring
     this.startProgressMonitoring();
-
     await Promise.all(workers);
     console.log('✅ All scraping completed!');
   }
@@ -68,10 +68,10 @@ class MasterScraper {
 
         console.log(`Worker ${workerId}: Processing ${job.query}`);
         
-        const savedCount = await scraper.scrapeMuseums(job.query, job.country, job.subdivision);
+        const savedCount = await scraper.scrapeBusinesses(job.query, job.country, job.subdivision);
         
         await this.queueManager.updateJobStatus(job._id, 'completed', savedCount);
-        console.log(`Worker ${workerId}: Completed ${job.query} - Saved ${savedCount} museums`);
+        console.log(`Worker ${workerId}: Completed ${job.query} - Saved ${savedCount} businesses`);
 
       } catch (error) {
         console.error(`Worker ${workerId} error:`, error.message);
@@ -89,7 +89,7 @@ class MasterScraper {
         const progress = await this.queueManager.getProgress();
         const percentage = ((progress.completed / progress.total) * 100).toFixed(1);
         
-        console.log(`📊 Progress: ${progress.completed}/${progress.total} (${percentage}%) - Museums found: ${progress.total_museums}`);
+        console.log(`📊 Progress: ${progress.completed}/${progress.total} (${percentage}%) - ${this.niche.name} found: ${progress.total_businesses}`);
         
         if (progress.completed === progress.total) {
           console.log('🎉 All scraping jobs completed!');
@@ -98,7 +98,7 @@ class MasterScraper {
       } catch (error) {
         console.error('Progress monitoring error:', error.message);
       }
-    }, 30000); // Every 30 seconds
+    }, 30000);
   }
 
   async stop() {
@@ -113,32 +113,4 @@ class MasterScraper {
   }
 }
 
-// Handle graceful shutdown
-process.on('SIGINT', async () => {
-  console.log('\n🛑 Received SIGINT, shutting down gracefully...');
-  if (global.masterScraper) {
-    await global.masterScraper.stop();
-  }
-  process.exit(0);
-});
-
-// Start the scraper
-async function main() {
-  const masterScraper = new MasterScraper();
-  global.masterScraper = masterScraper;
-  
-  try {
-    await masterScraper.init();
-    await masterScraper.start();
-  } catch (error) {
-    console.error('Fatal error:', error);
-    await masterScraper.stop();
-    process.exit(1);
-  }
-}
-
-if (require.main === module) {
-  main();
-}
-
-module.exports = MasterScraper;
+module.exports = GenericMasterScraper;
