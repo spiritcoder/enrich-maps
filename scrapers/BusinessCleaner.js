@@ -1,5 +1,11 @@
-class DataCleaner {
-  static cleanMuseumData(rawData) {
+const NicheLoader = require('../config/niche-loader');
+
+class BusinessCleaner {
+  constructor(niche = null) {
+    this.niche = niche || NicheLoader.getCurrentNiche();
+  }
+
+  cleanBusinessData(rawData) {
     const cleanedName = this.cleanName(rawData.name);
     const cleanedAddress = this.cleanAddress(rawData.address);
     const correctedSubdivision = this.extractSubdivisionFromAddress(cleanedAddress, rawData.country, rawData.subdivision);
@@ -14,7 +20,7 @@ class DataCleaner {
       hours: this.cleanHours(rawData.hours),
       rating: this.validateRating(rawData.rating),
       review_count: this.validateReviewCount(rawData.review_count),
-      type: this.categorizeMuseum(cleanedName, rawData.categories),
+      type: this.categorizeBusiness(cleanedName, rawData.categories),
       lat: this.validateCoordinate(rawData.lat, 'lat'),
       lng: this.validateCoordinate(rawData.lng, 'lng'),
       images: this.cleanImages(rawData.images),
@@ -24,42 +30,39 @@ class DataCleaner {
     };
   }
 
-  static cleanUnicodeCharacters(text) {
+  cleanUnicodeCharacters(text) {
     if (!text) return null;
     return text
-      // Remove all control and formatting characters
-      .replace(/[\u0000-\u001F\u007F-\u009F]/g, '') // Control characters
-      .replace(/[\u200B-\u200F]/g, '') // Zero-width spaces and formatting
-      .replace(/[\u202A-\u202E]/g, '') // Directional markers
-      .replace(/[\u2060-\u206F]/g, '') // Word joiner and invisible characters
-      .replace(/\uFEFF/g, '') // Byte order mark
-      .replace(/\uFFFD/g, '') // Replacement character
-      // Remove specific problematic characters
-      .replace(/\u2026/g, '') // Ellipsis (…)
-      .replace(/[\u00AD]/g, '') // Soft hyphen
-      .replace(/[\u034F]/g, '') // Combining grapheme joiner
-      .replace(/[\u061C]/g, '') // Arabic letter mark
-      .replace(/[\u180E]/g, '') // Mongolian vowel separator
-      // Replace common characters with standard equivalents
-      .replace(/[\u2010-\u2015]/g, '-') // Various dashes
-      .replace(/[\u2018\u2019]/g, "'") // Smart single quotes
-      .replace(/[\u201C\u201D]/g, '"') // Smart double quotes
-      .replace(/[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g, ' ') // Various spaces
-      // Final cleanup
-      .normalize('NFC') // Normalize Unicode
-      .replace(/\s+/g, ' ') // Normalize multiple spaces
+      .replace(/[\u0000-\u001F\u007F-\u009F]/g, '')
+      .replace(/[\u200B-\u200F]/g, '')
+      .replace(/[\u202A-\u202E]/g, '')
+      .replace(/[\u2060-\u206F]/g, '')
+      .replace(/\uFEFF/g, '')
+      .replace(/\uFFFD/g, '')
+      .replace(/\u2026/g, '')
+      .replace(/[\u00AD]/g, '')
+      .replace(/[\u034F]/g, '')
+      .replace(/[\u061C]/g, '')
+      .replace(/[\u180E]/g, '')
+      .replace(/[\u2010-\u2015]/g, '-')
+      .replace(/[\u2018\u2019]/g, "'")
+      .replace(/[\u201C\u201D]/g, '"')
+      .replace(/[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g, ' ')
+      .normalize('NFC')
+      .replace(/\s+/g, ' ')
       .trim();
   }
 
-  static cleanName(name) {
+  cleanName(name) {
     if (!name) return null;
     const cleaned = this.cleanUnicodeCharacters(name);
     return cleaned ? cleaned.replace(/\s+/g, ' ').substring(0, 200) : null;
   }
 
-  static generateSlug(name, fallbackId = null) {
+  generateSlug(name, fallbackId = null) {
+    const prefix = this.niche.name.slice(0, -1);
     if (!name || name.trim() === '') {
-      return fallbackId ? `museum-${fallbackId.toString().slice(-8)}` : `museum-${Date.now()}`;
+      return fallbackId ? `${prefix}-${fallbackId.toString().slice(-8)}` : `${prefix}-${Date.now()}`;
     }
     
     let slug = name.toLowerCase()
@@ -72,19 +75,19 @@ class DataCleaner {
       .substring(0, 80);
     
     if (!slug || slug === '' || slug === '-') {
-      return fallbackId ? `museum-${fallbackId.toString().slice(-8)}` : `museum-${Date.now()}`;
+      return fallbackId ? `${prefix}-${fallbackId.toString().slice(-8)}` : `${prefix}-${Date.now()}`;
     }
     
     return slug;
   }
 
-  static cleanAddress(address) {
+  cleanAddress(address) {
     if (!address) return null;
     const cleaned = this.cleanUnicodeCharacters(address);
     return cleaned ? cleaned.replace(/\s+/g, ' ').substring(0, 300) : null;
   }
 
-  static normalizeAddress(address) {
+  normalizeAddress(address) {
     if (!address) return null;
     return address.toLowerCase()
       .replace(/[^a-z0-9\s]/g, '')
@@ -92,21 +95,14 @@ class DataCleaner {
       .trim();
   }
 
-  static cleanPhone(phone) {
+  cleanPhone(phone) {
     if (!phone) return null;
     
-    // Clean Unicode characters first
     const unicodeCleaned = this.cleanUnicodeCharacters(phone);
     if (!unicodeCleaned) return null;
     
-    // Check for invalid phone patterns (UI text)
     const invalidPatterns = [
-      'send to phone',
-      'call',
-      'phone',
-      'contact',
-      'click to call',
-      'tap to call'
+      'send to phone', 'call', 'phone', 'contact', 'click to call', 'tap to call'
     ];
     
     const phoneLower = unicodeCleaned.toLowerCase().trim();
@@ -114,12 +110,11 @@ class DataCleaner {
       return null;
     }
     
-    // Remove all non-digit characters except + and spaces
     const cleaned = unicodeCleaned.replace(/[^\d+\s()-]/g, '');
     return cleaned.length >= 10 ? cleaned : null;
   }
 
-  static cleanWebsite(website) {
+  cleanWebsite(website) {
     if (!website) return null;
     
     const cleaned = this.cleanUnicodeCharacters(website);
@@ -133,36 +128,27 @@ class DataCleaner {
     }
   }
 
-  static cleanHours(hours) {
+  cleanHours(hours) {
     if (!hours) return null;
     const cleaned = this.cleanUnicodeCharacters(hours);
     return cleaned ? cleaned.substring(0, 500) : null;
   }
 
-  static validateRating(rating) {
+  validateRating(rating) {
     const num = parseFloat(rating);
     return (num >= 0 && num <= 5) ? num : null;
   }
 
-  static validateReviewCount(count) {
+  validateReviewCount(count) {
     const num = parseInt(count);
     return (num >= 0) ? num : 0;
   }
 
-  static categorizeMuseum(name, categories) {
+  categorizeBusiness(name, categories) {
     if (!name) return 'General';
     
     const nameLower = name.toLowerCase();
-    const categoryTypes = {
-      'Art': ['art', 'gallery', 'painting', 'sculpture'],
-      'History': ['history', 'historical', 'heritage', 'memorial'],
-      'Science': ['science', 'technology', 'planetarium', 'observatory'],
-      'Natural History': ['natural', 'nature', 'dinosaur', 'fossil'],
-      'Cultural': ['cultural', 'culture', 'ethnographic', 'folk'],
-      'Military': ['military', 'war', 'army', 'navy', 'air force'],
-      'Children': ['children', 'kids', 'family', 'interactive'],
-      'Specialty': ['maritime', 'aviation', 'automotive', 'railway', 'sports']
-    };
+    const categoryTypes = this.niche.categories;
 
     for (const [type, keywords] of Object.entries(categoryTypes)) {
       if (keywords.some(keyword => nameLower.includes(keyword))) {
@@ -173,7 +159,7 @@ class DataCleaner {
     return 'General';
   }
 
-  static validateCoordinate(coord, type) {
+  validateCoordinate(coord, type) {
     const num = parseFloat(coord);
     if (isNaN(num)) return null;
     
@@ -186,16 +172,16 @@ class DataCleaner {
     return null;
   }
 
-  static cleanImages(images) {
+  cleanImages(images) {
     if (!Array.isArray(images)) return [];
     
     return images
       .filter(img => img && typeof img === 'string')
       .filter(img => img.startsWith('http'))
-      .slice(0, 5); // Keep max 5 images
+      .slice(0, 5);
   }
 
-  static extractSubdivisionFromAddress(address, country, currentSubdivision) {
+  extractSubdivisionFromAddress(address, country, currentSubdivision) {
     if (!address || !country) return currentSubdivision;
     
     const subdivisions = this.getSubdivisionsForCountry(country);
@@ -203,12 +189,10 @@ class DataCleaner {
     
     const addressLower = address.toLowerCase();
     
-    // Check if current subdivision appears in address
     if (currentSubdivision && addressLower.includes(currentSubdivision.toLowerCase())) {
       return currentSubdivision;
     }
     
-    // Look for any subdivision name in the address
     for (const subdivision of subdivisions) {
       if (addressLower.includes(subdivision.toLowerCase())) {
         return subdivision;
@@ -218,7 +202,7 @@ class DataCleaner {
     return currentSubdivision;
   }
   
-  static getSubdivisionsForCountry(country) {
+  getSubdivisionsForCountry(country) {
     try {
       const fs = require('fs');
       const path = require('path');
@@ -235,26 +219,38 @@ class DataCleaner {
     }
   }
 
-  static isValidMuseum(data) {
-    // Basic validation rules
+  isValidBusiness(data) {
     if (!data.name || data.name.length < 2) return false;
     
-    // Require at least phone or website
-    if (!data.phone && !data.website) return false;
-    
-    // Check if it's actually a museum
-    const excludeKeywords = [
-      'restaurant', 'hotel', 'shop', 'store', 'mall', 'parking',
-      'hospital', 'school', 'office', 'apartment', 'gas station', 'park'
-    ];
-    
-    const nameLower = data.name.toLowerCase();
-    if (excludeKeywords.some(keyword => nameLower.includes(keyword))) {
+    if (this.niche.validation.requireContact && !data.phone && !data.website) {
       return false;
     }
+    
+    const nameLower = data.name.toLowerCase();
+    
+    if (this.niche.validation.overrideKeyword && nameLower.includes(this.niche.validation.overrideKeyword)) {
+      return this.checkQualityThresholds(data);
+    }
+    
+    const excludedKeyword = this.niche.validation.excludeKeywords.find(keyword => nameLower.includes(keyword));
+    if (excludedKeyword) {
+      return false;
+    }
+    
+    return this.checkQualityThresholds(data);
+  }
 
+  checkQualityThresholds(data) {
+    if (data.rating !== null && data.rating < this.niche.validation.minRating) {
+      return false;
+    }
+    
+    if (data.review_count !== null && data.review_count < this.niche.validation.minReviews) {
+      return false;
+    }
+    
     return true;
   }
 }
 
-module.exports = DataCleaner;
+module.exports = BusinessCleaner;

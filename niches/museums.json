@@ -1,0 +1,44 @@
+{
+  "name": "museums",
+  "database": {
+    "name": "museum_scraper",
+    "collections": {
+      "raw": "raw_museum_data",
+      "processed": "museums",
+      "jobs": "scraping_jobs",
+      "status": "processing_status"
+    }
+  },
+  "search": {
+    "terms": ["museums in", "museum", "art gallery in", "gallery in"],
+    "maxPerSearch": 100
+  },
+  "validation": {
+    "includeKeywords": [
+      "museum", "gallery", "exhibition", "art center", "cultural center",
+      "heritage", "history center", "science center", "planetarium",
+      "aquarium", "zoo", "botanical garden",
+      "musée", "galerie", "exposition", "centre culturel",
+      "museo", "galería", "exposición", "centro cultural",
+      "博物館", "美術館", "ギャラリー", "博物馆", "美术馆", "画廊"
+    ],
+    "excludeKeywords": [
+      "restaurant", "hotel", "shop", "store", "mall", "parking",
+      "hospital", "school", "office", "apartment", "gas station", "park"
+    ],
+    "overrideKeyword": "museum",
+    "requireContact": true,
+    "minRating": 4.0,
+    "minReviews": 10
+  },
+  "categories": {
+    "Art": ["art", "gallery", "painting", "sculpture"],
+    "History": ["history", "historical", "heritage", "memorial"],
+    "Science": ["science", "technology", "planetarium", "observatory"],
+    "Natural History": ["natural", "nature", "dinosaur", "fossil"],
+    "Cultural": ["cultural", "culture", "ethnographic", "folk"],
+    "Military": ["military", "war", "army", "navy", "air force"],
+    "Children": ["children", "kids", "family", "interactive"],
+    "Specialty": ["maritime", "aviation", "automotive", "railway", "sports"]
+  }
+}

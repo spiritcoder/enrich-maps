@@ -1,0 +1,43 @@
+{
+  "name": "restaurants",
+  "database": {
+    "name": "restaurant_scraper",
+    "collections": {
+      "raw": "raw_restaurant_data",
+      "processed": "restaurants",
+      "jobs": "scraping_jobs",
+      "status": "processing_status"
+    }
+  },
+  "search": {
+    "terms": ["restaurants in", "best restaurants", "dining in", "food in"],
+    "maxPerSearch": 100
+  },
+  "validation": {
+    "includeKeywords": [
+      "restaurant", "cafe", "bistro", "diner", "eatery", "pizzeria",
+      "bar", "pub", "grill", "kitchen", "dining", "food",
+      "restaurante", "café", "comida", "cocina",
+      "restaurant", "café", "cuisine", "nourriture",
+      "ristorante", "caffè", "cucina", "cibo"
+    ],
+    "excludeKeywords": [
+      "museum", "hotel", "shop", "store", "mall", "parking",
+      "hospital", "school", "office", "apartment", "gas station"
+    ],
+    "overrideKeyword": "restaurant",
+    "requireContact": true,
+    "minRating": 4.2,
+    "minReviews": 25
+  },
+  "categories": {
+    "Fine Dining": ["fine dining", "upscale", "michelin", "gourmet"],
+    "Casual": ["casual", "family", "bistro", "cafe"],
+    "Fast Food": ["fast food", "quick", "drive", "takeaway"],
+    "Pizza": ["pizza", "pizzeria", "italian"],
+    "Asian": ["chinese", "japanese", "thai", "indian", "asian"],
+    "Mexican": ["mexican", "taco", "burrito", "tex-mex"],
+    "Bar & Grill": ["bar", "grill", "pub", "brewery"],
+    "Bakery": ["bakery", "pastry", "bread", "dessert"]
+  }
+}

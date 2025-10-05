@@ -1,0 +1,42 @@
+{
+  "name": "tattoo",
+  "database": {
+    "name": "tattoo_scraper",
+    "collections": {
+      "raw": "raw_tattoo_data",
+      "processed": "tattoo",
+      "jobs": "scraping_jobs",
+      "status": "processing_status"
+    }
+  },
+  "search": {
+    "terms": ["tattoo shops in"],
+    "maxPerSearch": 100
+  },
+  "validation": {
+    "includeKeywords": [
+      "tattoo", "tattoo shop", "tattoo studio", "ink", "body art",
+      "piercing", "tatoueur", "tatouage", "studio de tatouage",
+      "tatuaje", "tatuador", "estudio de tatuajes",
+      "タトゥー", "刺青", "タトゥースタジオ", "纹身", "刺青", "纹身店"
+    ],
+    "excludeKeywords": [
+      "museum", "hotel", "shop", "store", "mall", "parking",
+      "hospital", "school", "office", "apartment", "gas station"
+    ],
+    "overrideKeyword": "tattoo",
+    "requireContact": true,
+    "minRating": 4.2,
+    "minReviews": 0
+  },
+  "categories": {
+    "Traditional": ["traditional", "old school", "american traditional"],
+    "Realism": ["realism", "realistic", "portrait"],
+    "Watercolor": ["watercolor", "aquarelle"],
+    "Tribal": ["tribal", "polynesian", "maori"],
+    "Japanese": ["japanese", "irezumi"],
+    "Blackwork": ["blackwork", "black and grey"],
+    "Neo-Traditional": ["neo-traditional", "new school"],
+    "Minimalist": ["minimalist", "line work", "geometric"]
+  }
+}

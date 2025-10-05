@@ -1,12 +1,12 @@
 {
-  "name": "museum-scraper",
+  "name": "terminal-scraper",
   "version": "1.0.0",
-  "description": "Global museum scraping system",
-  "main": "scripts/master-scraper.js",
+  "description": "Terminal scraping system",
+  "main": "scripts/scrape-niche.js",
   "scripts": {
-    "start": "node scripts/master-scraper.js",
-    "process": "node scripts/process-queue.js",
-    "validate": "node scripts/data-validator.js"
+    "start": "node scripts/scrape-niche.js",
+    "process": "node scripts/process-niche.js",
+    "validate": "node scripts/validate-niche.js"
   },
   "dependencies": {
     "axios": "^1.6.0",

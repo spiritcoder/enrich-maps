@@ -3,11 +3,13 @@ const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const UserAgent = require('user-agents');
 const config = require('../config/scraper');
 const ProxyManager = require('../services/ProxyManager');
+const NicheLoader = require('../config/niche-loader');
 
 puppeteer.use(StealthPlugin());
 
-class GoogleMapsParser {
-  constructor(rateLimiter) {
+class GenericGoogleMapsParser {
+  constructor(rateLimiter, niche = null) {
+    this.niche = niche || NicheLoader.getCurrentNiche();
     this.proxyManager = new ProxyManager();
     this.rateLimiter = rateLimiter;
     this.browser = null;
@@ -46,7 +48,7 @@ class GoogleMapsParser {
     });
   }
 
-  async scrapeMuseums(query, country, subdivision) {
+  async scrapeBusinesses(query, country, subdivision) {
     const page = await this.browser.newPage();
     const userAgent = new UserAgent();
     
@@ -56,7 +58,6 @@ class GoogleMapsParser {
         await page.authenticate(credentials);
       }
       
-      // Set realistic user agent and viewport
       const viewports = [
         { width: 1920, height: 1080 },
         { width: 1366, height: 768 },
@@ -68,7 +69,6 @@ class GoogleMapsParser {
       await page.setUserAgent(userAgent.toString());
       await page.setViewport(viewport);
       
-      // Set realistic headers
       await page.setExtraHTTPHeaders({
         'Accept-Language': 'en-US,en;q=0.9',
         'Accept-Encoding': 'gzip, deflate, br',
@@ -86,10 +86,8 @@ class GoogleMapsParser {
       const searchUrl = `https://www.google.com/maps/search/${encodeURIComponent(query)}`;
       await page.goto(searchUrl, { waitUntil: 'networkidle0', timeout: config.timeout });
       
-      // Wait for page to fully load before checking for errors
       await page.waitForTimeout(5000);
       
-      // Check for consent and error pages
       const pageContent = await page.content();
       const pageTitle = await page.title();
       
@@ -98,42 +96,29 @@ class GoogleMapsParser {
         const handled = await this.handleConsentPage(page);
         if (!handled) {
           console.log(`❌ Failed to handle consent page`);
-          return [];
+          return 0;
         }
         await page.waitForTimeout(3000);
       } else if (this.isErrorPage(pageContent, pageTitle)) {
-        const timestamp = Date.now();
-        const screenshotPath = `screenshots/error_search_${timestamp}.png`;
-        await page.screenshot({ path: screenshotPath, fullPage: true });
-        
         console.log(`❌ Google error page detected for: ${query}`);
-        console.log(`📸 Screenshot saved: ${screenshotPath}`);
-        console.log(`📄 Page title: ${pageTitle}`);
-        console.log(`🔗 URL: ${page.url()}`);
-        
-        return [];
+        return 0;
       }
       
-      // Human-like behavior
       await page.waitForTimeout(3000 + Math.random() * 4000);
       await this.simulateHumanBehavior(page);
-      
-      // Scroll to load more results
       await this.scrollResults(page);
       
-      // Extract business links
       const links = await this.extractBusinessLinks(page);
       
       if (links.length === 0) {
         console.log(`No results found for: ${query}`);
-        return [];
+        return 0;
       }
       
       console.log(`Found ${links.length} business links`);
       
-      // Extract details from each business with progressive saving
-      const maxMuseums = config.max_museums_per_search;
-      const targetCount = Math.min(links.length, maxMuseums);
+      const maxBusinesses = this.niche.search.maxPerSearch || 100;
+      const targetCount = Math.min(links.length, maxBusinesses);
       let savedCount = 0;
       
       for (let i = 0; i < targetCount; i++) {
@@ -144,27 +129,25 @@ class GoogleMapsParser {
           if (details && details.name) {
             console.log(`Extracted: ${details.name}`);
             
-            if (this.isMuseum(details.name, details.categories)) {
+            if (this.isValidBusiness(details.name, details.categories)) {
               details.country = country;
               details.subdivision = subdivision;
               details.source_url = searchUrl;
               details.scraped_at = new Date();
               
-              // Progressive saving - save immediately
               try {
-                const result = await this.saveMuseum(details);
+                const result = await this.saveBusiness(details);
                 if (result) {
                   savedCount++;
-                  const action = typeof result === 'string' ? 'Saved' : 'Updated';
-                  console.log(`✓ ${action} museum ${savedCount}/${targetCount}: ${details.name}`);
+                  console.log(`✓ Saved business ${savedCount}/${targetCount}: ${details.name}`);
                 } else {
                   console.log(`↻ Duplicate skipped: ${details.name}`);
                 }
               } catch (saveError) {
-                console.error(`✗ Failed to save museum ${details.name}:`, saveError.message);
+                console.error(`✗ Failed to save business ${details.name}:`, saveError.message);
               }
             } else {
-              console.log(`✗ Not a museum: ${details.name}`);
+              console.log(`✗ Not a valid ${this.niche.name}: ${details.name}`);
             }
           } else {
             console.log(`✗ Failed to extract name from business ${i + 1}`);
@@ -173,10 +156,9 @@ class GoogleMapsParser {
           console.error(`Error extracting business ${i + 1}:`, error.message);
         }
         
-        // Human-like delay between requests
         if (i < targetCount - 1) {
-          const delay = 8000 + Math.random() * 12000; // 8-20 seconds
-          console.log(`⏳ Waiting ${Math.round(delay/1000)}s before next museum...`);
+          const delay = 8000 + Math.random() * 12000;
+          console.log(`⏳ Waiting ${Math.round(delay/1000)}s before next business...`);
           await page.waitForTimeout(delay);
         }
       }
@@ -185,10 +167,37 @@ class GoogleMapsParser {
       
     } catch (error) {
       console.error(`Error scraping ${query}:`, error.message);
-      return [];
+      return 0;
     } finally {
       await page.close();
     }
+  }
+
+  isValidBusiness(name, categories = []) {
+    if (!name) return false;
+    
+    const nameLower = name.toLowerCase();
+    
+    // Check categories first
+    if (categories && categories.length > 0) {
+      const categoryText = categories.join(' ').toLowerCase();
+      if (this.niche.validation.includeKeywords.some(keyword => categoryText.includes(keyword.toLowerCase()))) {
+        return true;
+      }
+    }
+    
+    // Check exclude keywords
+    if (this.niche.validation.excludeKeywords.some(keyword => nameLower.includes(keyword.toLowerCase()))) {
+      return false;
+    }
+    
+    // Check include keywords in name
+    if (this.niche.validation.includeKeywords.some(keyword => nameLower.includes(keyword.toLowerCase()))) {
+      return true;
+    }
+    
+    // Trust Google's search results as fallback
+    return true;
   }
 
   async scrollResults(page) {
@@ -249,39 +258,22 @@ class GoogleMapsParser {
     const details = {};
     
     try {
-      // Set headers for detail page
       await detailPage.setExtraHTTPHeaders({
         'Accept-Language': 'en-US,en;q=0.9',
         'Referer': 'https://www.google.com/maps/'
       });
       
       await detailPage.goto(link, { waitUntil: 'networkidle0', timeout: config.timeout });
-      
-      // Wait for page to fully load before checking for errors
       await detailPage.waitForTimeout(3000);
       
-      // Check for consent and error pages
       const pageContent = await detailPage.content();
       const pageTitle = await detailPage.title();
       
       if (this.isConsentPage(pageContent, pageTitle)) {
-        console.log(`🔒 Consent page on detail page, handling...`);
         const handled = await this.handleConsentPage(detailPage);
-        if (!handled) {
-          console.log(`❌ Failed to handle consent on detail page`);
-          return null;
-        }
+        if (!handled) return null;
         await detailPage.waitForTimeout(3000);
       } else if (this.isErrorPage(pageContent, pageTitle)) {
-        const timestamp = Date.now();
-        const screenshotPath = `screenshots/error_detail_${timestamp}.png`;
-        await detailPage.screenshot({ path: screenshotPath, fullPage: true });
-        
-        console.log(`❌ Error page detected on detail page`);
-        console.log(`📸 Screenshot saved: ${screenshotPath}`);
-        console.log(`📄 Page title: ${pageTitle}`);
-        console.log(`🔗 URL: ${detailPage.url()}`);
-        
         return null;
       }
       
@@ -336,44 +328,26 @@ class GoogleMapsParser {
         }
       }
       
-      // Extract review count - try multiple approaches
-      details.review_count = 0;
-      
-      // Method 1: Look for review count in rating area
-      try {
-        const reviewText = await detailPage.evaluate(() => {
-          const ratingArea = document.querySelector('.jANrlb, .ceNzKf')?.parentElement;
-          if (ratingArea) {
-            const text = ratingArea.textContent || '';
-            const match = text.match(/([\d,]+)\s*reviews?/i);
-            return match ? match[1] : null;
-          }
-          return null;
-        });
-        
-        if (reviewText) {
-          details.review_count = parseInt(reviewText.replace(/,/g, ''));
-        }
-      } catch (err) {}
-      
-      // Method 2: Search entire page for review count if not found
-      if (details.review_count === 0) {
+      // Extract review count
+      const reviewSelectors = config.selectors.reviews.split(', ');
+      for (const selector of reviewSelectors) {
         try {
-          const reviewCount = await detailPage.evaluate(() => {
-            const allText = document.body.textContent || '';
-            const matches = allText.match(/([\d,]+)\s*reviews?/gi);
-            if (matches && matches.length > 0) {
-              const numbers = matches.map(m => {
-                const num = m.match(/([\d,]+)/)[1];
-                return parseInt(num.replace(/,/g, ''));
-              });
-              return Math.max(...numbers);
+          const reviewEl = await detailPage.$(selector);
+          if (reviewEl) {
+            const reviewText = await detailPage.evaluate(el => {
+              const text = el.innerText || el.textContent || el.getAttribute('aria-label') || '';
+              const match = text.match(/([\d,]+)\s*reviews?/i);
+              return match ? match[1] : null;
+            }, reviewEl);
+            
+            if (reviewText) {
+              details.review_count = parseInt(reviewText.replace(/,/g, ''));
+              break;
             }
-            return 0;
-          });
-          
-          details.review_count = reviewCount;
-        } catch (err) {}
+          }
+        } catch (err) {
+          continue;
+        }
       }
       
       // Extract phone
@@ -427,11 +401,46 @@ class GoogleMapsParser {
         }
       }
       
-      // Extract coordinates from URL
-      const match = link.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
-      if (match) {
-        details.lat = parseFloat(match[1]);
-        details.lng = parseFloat(match[2]);
+      // Extract hours
+      try {
+        const hoursEl = await detailPage.$('div[data-item-id="oh"], .t39EBf, .OqCZI');
+        if (hoursEl) {
+          details.hours = (await detailPage.evaluate(el => el.innerText, hoursEl)).trim();
+        }
+      } catch (err) {}
+      
+      // Extract coordinates from URL (multiple patterns)
+      let coordMatch = link.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
+      if (!coordMatch) {
+        coordMatch = link.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/);
+        if (coordMatch) {
+          details.lat = parseFloat(coordMatch[1]);
+          details.lng = parseFloat(coordMatch[2]);
+        }
+      } else {
+        details.lat = parseFloat(coordMatch[1]);
+        details.lng = parseFloat(coordMatch[2]);
+      }
+      
+      // Fallback: extract coordinates from page content
+      if (!details.lat || !details.lng) {
+        try {
+          const coords = await detailPage.evaluate(() => {
+            const scripts = document.querySelectorAll('script');
+            for (const script of scripts) {
+              const text = script.textContent || '';
+              const match = text.match(/"(-?\d+\.\d+)","(-?\d+\.\d+)"/);
+              if (match) {
+                return { lat: parseFloat(match[1]), lng: parseFloat(match[2]) };
+              }
+            }
+            return null;
+          });
+          if (coords) {
+            details.lat = coords.lat;
+            details.lng = coords.lng;
+          }
+        } catch (err) {}
       }
       
       // Extract images
@@ -460,13 +469,21 @@ class GoogleMapsParser {
           const aboutEl = await detailPage.$(selector);
           if (aboutEl) {
             const aboutText = (await detailPage.evaluate(el => el.innerText, aboutEl)).trim();
-            if (aboutText && aboutText.length > 20) {
+            if (aboutText && aboutText.length > 10) {
               details.about = aboutText;
               break;
             }
           }
         } catch (err) {
           continue;
+        }
+      }
+      
+      // Fallback: extract review count from about text if not found
+      if (!details.review_count && details.about) {
+        const aboutMatch = details.about.match(/\((\d+)\)/); // Match (197) pattern
+        if (aboutMatch) {
+          details.review_count = parseInt(aboutMatch[1]);
         }
       }
       
@@ -484,76 +501,10 @@ class GoogleMapsParser {
     }
   }
 
-  isMuseum(name, categories = []) {
-    if (!name) return false;
-    
-    // Step 1: Check categories first (most reliable)
-    const museumCategories = [
-      'museum', 'art museum', 'history museum', 'science museum', 'natural history museum',
-      'gallery', 'art gallery', 'exhibition', 'cultural center', 'heritage center',
-      'planetarium', 'aquarium', 'zoo', 'botanical garden', 'art center'
-    ];
-    
-    if (categories && categories.length > 0) {
-      const categoryText = categories.join(' ').toLowerCase();
-      if (museumCategories.some(cat => categoryText.includes(cat))) {
-        return true;
-      }
-    }
-    
-    // Step 2: Multi-language name keywords
-    const museumKeywords = [
-      // English
-      'museum', 'gallery', 'exhibition', 'art center', 'cultural center',
-      'heritage', 'history center', 'science center', 'planetarium',
-      'aquarium', 'zoo', 'botanical garden',
-      // French
-      'musée', 'galerie', 'exposition', 'centre culturel',
-      // German
-      'museum', 'galerie', 'ausstellung', 'kulturzentrum',
-      // Spanish
-      'museo', 'galería', 'exposición', 'centro cultural',
-      // Italian
-      'museo', 'galleria', 'mostra', 'centro culturale',
-      // Portuguese
-      'museu', 'galeria', 'centro cultural',
-      // Dutch
-      'museum', 'galerij', 'tentoonstelling',
-      // Japanese
-      '博物館', '美術館', 'ギャラリー',
-      // Chinese
-      '博物馆', '美术馆', '画廊'
-    ];
-    
-    // Step 3: Exclude non-museums
-    const excludeKeywords = [
-      'restaurant', 'hotel', 'shop', 'store', 'mall', 'parking',
-      'hospital', 'school', 'office', 'apartment', 'bank', 'pharmacy'
-    ];
-    
-    const nameLower = name.toLowerCase();
-    
-    if (excludeKeywords.some(keyword => nameLower.includes(keyword))) {
-      return false;
-    }
-    
-    // Step 4: Check name against multi-language keywords
-    if (museumKeywords.some(keyword => nameLower.includes(keyword))) {
-      return true;
-    }
-    
-    // Step 5: Trust Google's search results (fallback)
-    // Since we're searching for "museums in [location]", accept anything that passes exclusion
-    return true;
-  }
-
-
-
   isConsentPage(content, title = '') {
     const contentLower = content.toLowerCase();
     const titleLower = title.toLowerCase();
     
-    // Very specific consent page patterns
     const consentPatterns = [
       'before you continue to google',
       'before you use google',
@@ -561,7 +512,6 @@ class GoogleMapsParser {
       'privacy and terms'
     ];
     
-    // Must have consent pattern AND accept/reject buttons
     const hasConsentPattern = consentPatterns.some(pattern => 
       contentLower.includes(pattern) || titleLower.includes(pattern)
     );
@@ -574,7 +524,6 @@ class GoogleMapsParser {
 
   async handleConsentPage(page) {
     try {
-      // Look for accept button by common IDs first
       const buttonIds = ['L2AGLb', 'W0wltc'];
       for (const id of buttonIds) {
         const button = await page.$(`#${id}`);
@@ -585,7 +534,6 @@ class GoogleMapsParser {
         }
       }
       
-      // Look for accept button by text
       const buttons = await page.$$('button, div[role="button"]');
       for (const button of buttons) {
         const text = await page.evaluate(el => (el.textContent || '').toLowerCase(), button);
@@ -624,14 +572,12 @@ class GoogleMapsParser {
 
   async simulateHumanBehavior(page) {
     try {
-      // Random scroll
       await page.evaluate(() => {
         window.scrollBy(0, Math.random() * 300 + 100);
       });
       
       await page.waitForTimeout(500 + Math.random() * 1000);
       
-      // Random mouse movement
       const viewport = page.viewport();
       await page.mouse.move(
         Math.random() * viewport.width,
@@ -644,10 +590,9 @@ class GoogleMapsParser {
     }
   }
 
-  async saveMuseum(museumData) {
-    // This will be injected by the master scraper
+  async saveBusiness(businessData) {
     if (this.database) {
-      return await this.database.insertRawData(museumData);
+      return await this.database.insertRawData(businessData);
     }
     throw new Error('Database not available for saving');
   }
@@ -664,4 +609,4 @@ class GoogleMapsParser {
   }
 }
 
-module.exports = GoogleMapsParser;
+module.exports = GenericGoogleMapsParser;

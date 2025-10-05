@@ -1,8 +1,10 @@
-const Database = require('../config/database');
+const GenericDatabase = require('../config/database-generic');
+const NicheLoader = require('../config/niche-loader');
 
-class DataValidator {
-  constructor() {
-    this.database = new Database();
+class GenericValidator {
+  constructor(nicheName) {
+    this.niche = NicheLoader.loadNiche(nicheName);
+    this.database = new GenericDatabase(this.niche);
     this.db = null;
   }
 
@@ -12,7 +14,7 @@ class DataValidator {
   }
 
   async validateData() {
-    console.log('📊 Starting data validation...');
+    console.log(`📊 Starting ${this.niche.name} data validation...`);
     await this.init();
 
     const stats = await this.getStats();
@@ -23,8 +25,8 @@ class DataValidator {
     console.log(`Failed: ${stats.jobs.failed}`);
     
     console.log('\n=== DATA QUALITY ===');
-    console.log(`Raw Museums: ${stats.raw}`);
-    console.log(`Processed Museums: ${stats.processed}`);
+    console.log(`Raw Records: ${stats.raw}`);
+    console.log(`Processed Records: ${stats.processed}`);
     console.log(`Processing Rate: ${((stats.processed/stats.raw)*100).toFixed(1)}%`);
 
     const issues = await this.findIssues();
@@ -49,9 +51,9 @@ class DataValidator {
       }
     ];
 
-    const jobsResult = await this.db.collection('scraping_jobs').aggregate(jobsPipeline).toArray();
-    const rawCount = await this.db.collection('raw_museum_data').countDocuments();
-    const processedCount = await this.db.collection('museums').countDocuments();
+    const jobsResult = await this.db.collection(this.niche.database.collections.jobs).aggregate(jobsPipeline).toArray();
+    const rawCount = await this.db.collection(this.niche.database.collections.raw).countDocuments();
+    const processedCount = await this.db.collection(this.niche.database.collections.processed).countDocuments();
 
     return {
       jobs: jobsResult[0] || { total: 0, completed: 0, processing: 0, failed: 0 },
@@ -61,18 +63,18 @@ class DataValidator {
   }
 
   async findIssues() {
-    const missingCoords = await this.db.collection('museums').countDocuments({
+    const missingCoords = await this.db.collection(this.niche.database.collections.processed).countDocuments({
       $or: [{ lat: null }, { lng: null }, { lat: { $exists: false } }, { lng: { $exists: false } }]
     });
 
-    const missingContact = await this.db.collection('museums').countDocuments({
+    const missingContact = await this.db.collection(this.niche.database.collections.processed).countDocuments({
       $and: [
         { $or: [{ phone: null }, { phone: { $exists: false } }] },
         { $or: [{ website: null }, { website: { $exists: false } }] }
       ]
     });
 
-    const duplicates = await this.db.collection('museums').aggregate([
+    const duplicates = await this.db.collection(this.niche.database.collections.processed).aggregate([
       { $group: { _id: '$name', count: { $sum: 1 } } },
       { $match: { count: { $gt: 1 } } },
       { $count: 'total' }
@@ -87,7 +89,13 @@ class DataValidator {
 }
 
 async function main() {
-  const validator = new DataValidator();
+  const nicheName = process.argv[2];
+  if (!nicheName) {
+    console.error('Usage: node validate-niche.js <niche-name>');
+    process.exit(1);
+  }
+
+  const validator = new GenericValidator(nicheName);
   await validator.validateData();
 }
 
@@ -95,4 +103,4 @@ if (require.main === module) {
   main().catch(console.error);
 }
 
-module.exports = DataValidator;
+module.exports = GenericValidator;
