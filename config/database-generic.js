@@ -21,27 +21,38 @@ class GenericDatabase {
   async createIndexes() {
     const collections = this.niche.database.collections;
     
-    // Raw data collection indexes
-    await this.db.collection(collections.raw).createIndex({ created_at: 1 });
+    // Get collection names with defaults
+    const rawCollection = collections.raw || 'raw_data';
+    const processedCollection = collections.processed || 'businesses';
+    const jobsCollection = collections.jobs || 'scraping_jobs';
+    const statusCollection = 'processing_status'; // Always use this name
     
-    // Processed data collection indexes
-    await this.db.collection(collections.processed).createIndex({ slug: 1 }, { unique: true });
-    await this.db.collection(collections.processed).createIndex({ normalized_address: 1, country: 1 });
-    await this.db.collection(collections.processed).createIndex({ phone: 1, country: 1 });
-    await this.db.collection(collections.processed).createIndex({ website: 1, country: 1 });
-    await this.db.collection(collections.processed).createIndex({ name: 1, country: 1, subdivision: 1 });
-    
-    // Jobs collection indexes
-    await this.db.collection(collections.jobs).createIndex({ status: 1 });
-    await this.db.collection(collections.jobs).createIndex({ created_at: 1 });
-    
-    // Processing status indexes
-    await this.db.collection(collections.status).createIndex({ raw_id: 1 }, { unique: true });
+    try {
+      // Raw data collection indexes
+      await this.db.collection(rawCollection).createIndex({ created_at: 1 });
+      
+      // Processed data collection indexes
+      await this.db.collection(processedCollection).createIndex({ normalized_address: 1, country: 1 });
+      await this.db.collection(processedCollection).createIndex({ phone: 1, country: 1 });
+      await this.db.collection(processedCollection).createIndex({ name: 1, country: 1, subdivision: 1 });
+      
+      // Jobs collection indexes
+      await this.db.collection(jobsCollection).createIndex({ status: 1 });
+      await this.db.collection(jobsCollection).createIndex({ created_at: 1 });
+      
+      // Processing status indexes
+      await this.db.collection(statusCollection).createIndex({ raw_id: 1 }, { unique: true });
+      
+      console.log('✅ Database indexes created successfully');
+    } catch (error) {
+      console.log('⚠️ Some indexes may already exist:', error.message);
+    }
   }
 
   async saveRawData(data) {
     const collections = this.niche.database.collections;
-    return await this.db.collection(collections.raw).insertOne({
+    const rawCollection = collections.raw || 'raw_data';
+    return await this.db.collection(rawCollection).insertOne({
       ...data,
       created_at: new Date()
     });
@@ -49,7 +60,8 @@ class GenericDatabase {
 
   async saveProcessedData(data) {
     const collections = this.niche.database.collections;
-    return await this.db.collection(collections.processed).insertOne({
+    const processedCollection = collections.processed || 'businesses';
+    return await this.db.collection(processedCollection).insertOne({
       ...data,
       created_at: new Date()
     });

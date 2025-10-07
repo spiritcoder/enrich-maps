@@ -48,7 +48,7 @@ class GenericGoogleMapsParser {
     });
   }
 
-  async scrapeBusinesses(query, country, subdivision) {
+  async scrapeBusinesses(query, country, subdivision, progressCallback = null) {
     const page = await this.browser.newPage();
     const userAgent = new UserAgent();
     
@@ -140,6 +140,11 @@ class GenericGoogleMapsParser {
                 if (result) {
                   savedCount++;
                   console.log(`✓ Saved business ${savedCount}/${targetCount}: ${details.name}`);
+                  
+                  // Call progress callback if provided
+                  if (progressCallback) {
+                    await progressCallback(i + 1, targetCount);
+                  }
                 } else {
                   console.log(`↻ Duplicate skipped: ${details.name}`);
                 }
