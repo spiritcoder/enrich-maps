@@ -1,34 +1,42 @@
 const Queue = require('bull');
 const redis = require('redis');
 
-// Create Redis connection
-const redisClient = redis.createClient({
+// Redis configuration
+const redisConfig = {
   host: process.env.REDIS_HOST || 'localhost',
   port: process.env.REDIS_PORT || 6379,
   password: process.env.REDIS_PASSWORD || undefined
+};
+
+// Create Redis client for manual operations
+const redisClient = redis.createClient(redisConfig);
+
+// Connect Redis client and add event listeners
+redisClient.on('connect', () => {
+  console.log('🔗 Redis client connected');
 });
 
-// Create job queue
+// Create job queue with same Redis config
 const scrapingQueue = new Queue('scraping jobs', {
   redis: {
-    host: process.env.REDIS_HOST || 'localhost',
-    port: process.env.REDIS_PORT || 6379,
-    password: process.env.REDIS_PASSWORD || undefined,
+    ...redisConfig,
     maxRetriesPerRequest: 3,
     retryDelayOnFailover: 100,
     connectTimeout: 10000,
-    lazyConnect: true
+    lazyConnect: false  // Changed to false to connect immediately
   },
   settings: {
     stalledInterval: 30 * 1000,    // Check every 30s
-    maxStalledCount: 1,            // Max stalled jobs
-    stallTimeout: 15 * 60 * 1000   // 15 minutes before stall
+    maxStalledCount: 3,            // Allow 3 stalls for web scraping
+    stallTimeout: 20 * 60 * 1000   // 20 minutes before stall
   }
 });
+
 
 // Job creation
 const createScrapingJob = async (projectId, jobData) => {
   try {
+    
     const job = await scrapingQueue.add('scrape-project', {
       projectId,
       ...jobData
@@ -42,10 +50,10 @@ const createScrapingJob = async (projectId, jobData) => {
       removeOnFail: 5
     });
 
-    console.log(`📋 Created scraping job ${job.id} for project ${projectId}`);
     return job;
 
   } catch (error) {
+    console.error('🎯 QUEUE: Error creating scraping job:', error);
     console.error('Error creating scraping job:', error);
     throw error;
   }
@@ -93,14 +101,31 @@ scrapingQueue.on('failed', (job, err) => {
   console.error(`❌ Job ${job.id} failed:`, err.message);
 });
 
-scrapingQueue.on('progress', (job, progress) => {
-  console.log(`📊 Job ${job.id} progress: ${progress}%`);
-});
+// Queue health check function
+const getQueueHealth = async () => {
+  try {
+    const waiting = await scrapingQueue.getWaiting();
+    const active = await scrapingQueue.getActive();
+    const completed = await scrapingQueue.getCompleted();
+    const failed = await scrapingQueue.getFailed();
+    
+    return {
+      waiting: waiting.length,
+      active: active.length,
+      completed: completed.length,
+      failed: failed.length
+    };
+  } catch (error) {
+    console.error('Error getting queue health:', error.message);
+    return null;
+  }
+};
 
 module.exports = {
   scrapingQueue,
   createScrapingJob,
   updateJobProgress,
   getJobStatus,
+  getQueueHealth,
   redisClient
 };

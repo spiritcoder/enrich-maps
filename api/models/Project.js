@@ -26,7 +26,8 @@ class Project {
       progress: {
         current: 0,
         total: 0,
-        percentage: 0
+        percentage: 0,
+        enrichedBusinesses: 0
       },
       results: {
         found: 0,
@@ -66,7 +67,7 @@ class Project {
     );
   }
 
-  async updateProgress(id, current, total) {
+  async updateProgress(id, current, total, enriched = 0) {
     const percentage = total > 0 ? Math.round((current / total) * 100) : 0;
     
     return await this.collection.updateOne(
@@ -76,6 +77,7 @@ class Project {
           'progress.current': current,
           'progress.total': total,
           'progress.percentage': percentage,
+          'progress.enrichedBusinesses': enriched,
           updatedAt: new Date()
         }
       }

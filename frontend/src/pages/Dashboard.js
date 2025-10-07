@@ -214,7 +214,7 @@ const Dashboard = () => {
             <div key={project._id} style={projectCardStyle}>
               <div>
                 <h4 style={{ margin: '0 0 0.5rem 0' }}>
-                  {getStatusIcon(project.status)} {project.keyword}
+                  {getStatusIcon(project.status)} {project.searchTerm || project.niche || project.keyword}
                 </h4>
                 <p style={{ margin: 0, fontSize: '0.9rem', color: '#6b7280' }}>
                   {project.locations?.length || project.countries?.length || 0} locations • 

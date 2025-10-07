@@ -31,10 +31,10 @@ const ProjectDetail = () => {
     }
   };
 
-  const handleDownload = async (fileUrl) => {
+  const handleDownload = async () => {
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(fileUrl, {
+      const response = await fetch(`/api/downloads/${project._id}`, {
         headers: {
           'Authorization': `Bearer ${token}`
         }
@@ -48,7 +48,7 @@ const ProjectDetail = () => {
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `${project.keyword}_results.xlsx`;
+      a.download = `${project.searchTerm || project.keyword}_results.xlsx`;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
@@ -139,7 +139,7 @@ const ProjectDetail = () => {
       </div>
 
       <h1 style={{ marginBottom: '2rem' }}>
-        {statusIcons[project.status]} {project.keyword}
+        {statusIcons[project.status]} {project.searchTerm || project.keyword}
       </h1>
 
       {/* Status Card */}
@@ -173,10 +173,10 @@ const ProjectDetail = () => {
           </div>
         )}
 
-        {project.status === 'completed' && project.results?.fileUrl && (
+        {project.status === 'completed' && project.results?.processed > 0 && (
           <div style={{ marginTop: '1rem' }}>
             <button 
-              onClick={() => handleDownload(project.results.fileUrl)}
+              onClick={handleDownload}
               style={downloadButtonStyle}
             >
               📥 Download Results
@@ -191,7 +191,7 @@ const ProjectDetail = () => {
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem' }}>
           <div>
             <h4 style={{ marginBottom: '0.5rem' }}>🔍 Search Details</h4>
-            <p><strong>Keyword:</strong> {project.keyword}</p>
+            <p><strong>Search Term:</strong> {project.searchTerm || project.keyword}</p>
             <p><strong>Locations:</strong> {project.locations?.map(l => l.label || l).join(', ') || project.countries?.join(', ')}</p>
             <p><strong>Created:</strong> {new Date(project.createdAt).toLocaleString()}</p>
           </div>

@@ -9,9 +9,13 @@ const userRoutes = require('./api/routes/users');
 const downloadRoutes = require('./api/routes/downloads');
 const countryRoutes = require('./api/routes/countries');
 const paymentRoutes = require('./api/routes/payments');
+const enrichmentRoutes = require('./api/routes/enrichment');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Trust proxy for rate limiting
+app.set('trust proxy', 1);
 
 // Middleware
 app.use(cors());
@@ -30,7 +34,8 @@ app.use('/api/projects', projectRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/countries', countryRoutes);
 app.use('/api/payments', paymentRoutes);
-app.use('/downloads', downloadRoutes);
+app.use('/api/enrichment', enrichmentRoutes);
+app.use('/api/downloads', downloadRoutes);
 
 // Health check
 app.get('/health', (req, res) => {

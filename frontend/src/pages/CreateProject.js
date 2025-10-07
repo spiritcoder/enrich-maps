@@ -1,28 +1,39 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { projects, countries } from '../services/api';
+import { projects, countries, enrichment } from '../services/api';
 
 const CreateProject = () => {
   const navigate = useNavigate();
   const [formData, setFormData] = useState({
-    keyword: '',
+    searchTerm: '',
+    businessLimit: '100',
     locations: [],
     fields: ['name', 'phone', 'website', 'address', 'rating'],
-    filters: {
-      minRating: 4.0,
-      minReviews: 5
+    enrichment: {
+      enabled: false,
+      aiProvider: 'deepseek',
+      fields: []
     }
   });
   const [selectedCountry, setSelectedCountry] = useState('');
   const [selectedSubdivisions, setSelectedSubdivisions] = useState([]);
   const [showSubdivisions, setShowSubdivisions] = useState(false);
   const [availableCountries, setAvailableCountries] = useState([]);
+  const [aiProviders, setAiProviders] = useState({});
+  const [enrichmentFields, setEnrichmentFields] = useState({});
+  const [fieldCategories, setFieldCategories] = useState({});
+  const [costBreakdown, setCostBreakdown] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
     loadCountries();
+    loadEnrichmentData();
   }, []);
+
+  useEffect(() => {
+    calculateCost();
+  }, [formData.businessLimit, formData.enrichment]);
 
   const loadCountries = async () => {
     try {
@@ -33,13 +44,55 @@ const CreateProject = () => {
     }
   };
 
+  const loadEnrichmentData = async () => {
+    try {
+      const [providersRes, fieldsRes] = await Promise.all([
+        enrichment.getProviders(),
+        enrichment.getFields()
+      ]);
+      setAiProviders(providersRes.data.providers);
+      setEnrichmentFields(fieldsRes.data.fields);
+      setFieldCategories(fieldsRes.data.categories);
+    } catch (error) {
+      console.error('Error loading enrichment data:', error);
+    }
+  };
+
+  const calculateCost = async () => {
+    const businessCount = parseInt(formData.businessLimit);
+    if (!businessCount || businessCount < 1) return;
+    
+    try {
+      const response = await enrichment.calculateCost({
+        businessCount,
+        aiProvider: formData.enrichment.enabled ? formData.enrichment.aiProvider : null,
+        fields: formData.enrichment.fields
+      });
+      setCostBreakdown(response.data.breakdown);
+    } catch (error) {
+      console.error('Error calculating cost:', error);
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
     setError('');
 
+    // Validate business limit
+    const businessLimit = parseInt(formData.businessLimit);
+    if (!businessLimit || businessLimit < 1 || businessLimit > 10000) {
+      setError('Business limit must be a number between 1 and 10,000');
+      setLoading(false);
+      return;
+    }
+
     try {
-      const response = await projects.create(formData);
+      const submitData = {
+        ...formData,
+        businessLimit // Convert to number for submission
+      };
+      const response = await projects.create(submitData);
       navigate(`/project/${response.data.project._id}`);
     } catch (error) {
       setError(error.response?.data?.error || 'Failed to create project');
@@ -205,22 +258,45 @@ const CreateProject = () => {
       )}
 
       <form onSubmit={handleSubmit}>
-        {/* Keyword Section */}
+        {/* Niche & Business Limit Section */}
         <div style={cardStyle}>
           <h3 style={{ marginBottom: '1rem' }}>🔍 What to Scrape</h3>
-          <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 'bold' }}>
-            Business Type / Keyword
-          </label>
-          <input
-            type="text"
-            placeholder="e.g., tattoo shops, restaurants, dentists"
-            value={formData.keyword}
-            onChange={(e) => setFormData(prev => ({ ...prev, keyword: e.target.value }))}
-            style={inputStyle}
-            required
-          />
+          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '1rem' }}>
+            <div>
+              <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 'bold' }}>
+                What type of business are you looking for?
+              </label>
+              <input
+                type="text"
+                placeholder="e.g., asian massage, pizza restaurant, dentist"
+                value={formData.searchTerm}
+                onChange={(e) => setFormData(prev => ({ ...prev, searchTerm: e.target.value }))}
+                style={inputStyle}
+                required
+              />
+            </div>
+            <div>
+              <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 'bold' }}>
+                Business Limit
+              </label>
+              <input
+                type="text"
+                placeholder="Enter number (1-10,000)"
+                value={formData.businessLimit}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  // Allow empty or numbers only
+                  if (value === '' || /^\d+$/.test(value)) {
+                    setFormData(prev => ({ ...prev, businessLimit: value }));
+                  }
+                }}
+                style={inputStyle}
+                required
+              />
+            </div>
+          </div>
           <p style={{ fontSize: '0.9rem', color: '#6b7280', marginTop: '0.5rem' }}>
-            Enter the type of business you want to find
+            Specify exactly how many businesses you want to scrape (1-10,000)
           </p>
         </div>
 
@@ -405,76 +481,195 @@ const CreateProject = () => {
           </div>
         </div>
 
-        {/* Fields Section */}
+        {/* Default Fields Section */}
         <div style={cardStyle}>
-          <h3 style={{ marginBottom: '1rem' }}>📋 Data Fields to Extract</h3>
+          <h3 style={{ marginBottom: '1rem' }}>📊 Default Data Fields</h3>
+          <p style={{ fontSize: '0.9rem', color: '#6b7280', marginBottom: '1rem' }}>
+            Standard business fields you can include in your export:
+          </p>
           <div style={checkboxGridStyle}>
-            {availableFields.map((field) => (
+            {[
+              { key: 'name', label: 'Business Name', description: 'Name of the business' },
+              { key: 'phone', label: 'Phone Number', description: 'Contact phone number' },
+              { key: 'website', label: 'Website', description: 'Business website URL' },
+              { key: 'address', label: 'Address', description: 'Physical address' },
+              { key: 'rating', label: 'Rating', description: 'Google Maps rating' },
+              { key: 'review_count', label: 'Review Count', description: 'Number of reviews' },
+              { key: 'hours', label: 'Business Hours', description: 'Operating hours' },
+              { key: 'categories', label: 'Categories', description: 'Business categories' },
+              { key: 'coordinates', label: 'Coordinates', description: 'Latitude and longitude' },
+              { key: 'images', label: 'Images', description: 'Business photos' }
+            ].map(field => (
               <label 
-                key={field.key} 
+                key={field.key}
                 style={{
                   ...checkboxStyle,
-                  background: formData.fields.includes(field.key) ? '#eff6ff' : 'white',
-                  borderColor: formData.fields.includes(field.key) ? '#2563eb' : '#e5e7eb'
+                  background: formData.fields?.includes(field.key) ? '#eff6ff' : 'white',
+                  borderColor: formData.fields?.includes(field.key) ? '#2563eb' : '#e5e7eb'
                 }}
               >
                 <input
                   type="checkbox"
-                  checked={formData.fields.includes(field.key)}
-                  onChange={() => handleFieldChange(field.key)}
+                  checked={formData.fields?.includes(field.key) || false}
+                  onChange={(e) => {
+                    const fields = e.target.checked 
+                      ? [...(formData.fields || []), field.key]
+                      : (formData.fields || []).filter(f => f !== field.key);
+                    setFormData(prev => ({ ...prev, fields }));
+                  }}
                   style={{ marginRight: '0.5rem' }}
                 />
-                {field.label}
+                <div>
+                  <div style={{ fontSize: '0.9rem', fontWeight: '500' }}>{field.label}</div>
+                  <div style={{ fontSize: '0.7rem', color: '#6b7280' }}>{field.description}</div>
+                </div>
               </label>
             ))}
           </div>
         </div>
 
-        {/* Filters Section */}
+        {/* AI Enrichment Section */}
         <div style={cardStyle}>
-          <h3 style={{ marginBottom: '1rem' }}>⚙️ Quality Filters</h3>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-            <div>
-              <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 'bold' }}>
-                Minimum Rating
-              </label>
-              <input
-                type="number"
-                min="0"
-                max="5"
-                step="0.1"
-                value={formData.filters.minRating}
-                onChange={(e) => setFormData(prev => ({
-                  ...prev,
-                  filters: { ...prev.filters, minRating: parseFloat(e.target.value) }
-                }))}
-                style={inputStyle}
-              />
-            </div>
-            <div>
-              <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 'bold' }}>
-                Minimum Reviews
-              </label>
-              <input
-                type="number"
-                min="0"
-                value={formData.filters.minReviews}
-                onChange={(e) => setFormData(prev => ({
-                  ...prev,
-                  filters: { ...prev.filters, minReviews: parseInt(e.target.value) }
-                }))}
-                style={inputStyle}
-              />
+          <h3 style={{ marginBottom: '1rem' }}>🤖 AI Data Enrichment (Optional)</h3>
+          
+          <p style={{ fontSize: '0.9rem', color: '#6b7280', marginBottom: '1rem' }}>
+            Enhance your data with AI-powered insights and additional business information:
+          </p>
+          <label style={{ display: 'flex', alignItems: 'center', marginBottom: '1rem', cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={formData.enrichment.enabled}
+              onChange={(e) => setFormData(prev => ({
+                ...prev,
+                enrichment: { ...prev.enrichment, enabled: e.target.checked }
+              }))}
+              style={{ marginRight: '0.5rem' }}
+            />
+            <strong>Enable AI Enrichment (+additional credits)</strong>
+          </label>
+          
+          {formData.enrichment.enabled && (
+            <>
+              {/* AI Provider Selection */}
+              <div style={{ marginBottom: '1.5rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 'bold' }}>
+                  AI Provider
+                </label>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.5rem' }}>
+                  {Object.entries(aiProviders).map(([key, provider]) => (
+                    <label 
+                      key={key}
+                      style={{
+                        ...checkboxStyle,
+                        background: formData.enrichment.aiProvider === key ? '#eff6ff' : 'white',
+                        borderColor: formData.enrichment.aiProvider === key ? '#2563eb' : '#e5e7eb'
+                      }}
+                    >
+                      <input
+                        type="radio"
+                        name="aiProvider"
+                        value={key}
+                        checked={formData.enrichment.aiProvider === key}
+                        onChange={(e) => setFormData(prev => ({
+                          ...prev,
+                          enrichment: { ...prev.enrichment, aiProvider: e.target.value }
+                        }))}
+                        style={{ marginRight: '0.5rem' }}
+                      />
+                      <div>
+                        <div>{provider.icon} {provider.name}</div>
+                        <div style={{ fontSize: '0.8rem', color: '#6b7280' }}>+{provider.costPerBusiness} credits/business</div>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              </div>
+              
+              {/* Enrichment Fields */}
+              <div>
+                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 'bold' }}>
+                  Enrichment Fields
+                </label>
+                {Object.entries(fieldCategories).map(([categoryKey, category]) => (
+                  <div key={categoryKey} style={{ marginBottom: '1rem' }}>
+                    <h4 style={{ margin: '0 0 0.5rem 0', color: '#374151' }}>{category.name}</h4>
+                    <p style={{ fontSize: '0.8rem', color: '#6b7280', margin: '0 0 0.5rem 0' }}>{category.description}</p>
+                    <div style={checkboxGridStyle}>
+                      {Object.entries(enrichmentFields)
+                        .filter(([_, field]) => field.category === categoryKey)
+                        .map(([fieldKey, field]) => (
+                          <label 
+                            key={fieldKey}
+                            style={{
+                              ...checkboxStyle,
+                              background: formData.enrichment.fields.includes(fieldKey) ? '#eff6ff' : 'white',
+                              borderColor: formData.enrichment.fields.includes(fieldKey) ? '#2563eb' : '#e5e7eb'
+                            }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={formData.enrichment.fields.includes(fieldKey)}
+                              onChange={(e) => {
+                                const fields = e.target.checked 
+                                  ? [...formData.enrichment.fields, fieldKey]
+                                  : formData.enrichment.fields.filter(f => f !== fieldKey);
+                                setFormData(prev => ({
+                                  ...prev,
+                                  enrichment: { ...prev.enrichment, fields }
+                                }));
+                              }}
+                              style={{ marginRight: '0.5rem' }}
+                            />
+                            <div>
+                              <div style={{ fontSize: '0.9rem' }}>{field.name}</div>
+                              <div style={{ fontSize: '0.7rem', color: '#6b7280' }}>{field.description}</div>
+                            </div>
+                          </label>
+                        ))
+                      }
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+        
+        {/* Cost Breakdown */}
+        {costBreakdown && (
+          <div style={cardStyle}>
+            <h3 style={{ marginBottom: '1rem' }}>💰 Cost Breakdown</h3>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '1rem' }}>
+              <div style={{ textAlign: 'center', padding: '1rem', background: '#f8fafc', borderRadius: '6px' }}>
+                <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#2563eb' }}>
+                  {costBreakdown.baseCost}
+                </div>
+                <div style={{ fontSize: '0.9rem', color: '#6b7280' }}>Base Scraping</div>
+              </div>
+              {formData.enrichment.enabled && (
+                <div style={{ textAlign: 'center', padding: '1rem', background: '#f8fafc', borderRadius: '6px' }}>
+                  <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#10b981' }}>
+                    {costBreakdown.enrichmentCost}
+                  </div>
+                  <div style={{ fontSize: '0.9rem', color: '#6b7280' }}>AI Enrichment</div>
+                </div>
+              )}
+              <div style={{ textAlign: 'center', padding: '1rem', background: '#fef3c7', borderRadius: '6px' }}>
+                <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#d97706' }}>
+                  {costBreakdown.totalCost}
+                </div>
+                <div style={{ fontSize: '0.9rem', color: '#92400e' }}>Total Credits</div>
+              </div>
             </div>
           </div>
-        </div>
+        )}
 
         {/* Submit */}
         <div style={{ textAlign: 'center' }}>
           <button 
             type="submit" 
             style={buttonStyle} 
-            disabled={loading || formData.locations.length === 0 || !formData.keyword}
+            disabled={loading || formData.locations.length === 0 || !formData.searchTerm || !formData.businessLimit || parseInt(formData.businessLimit) < 1}
           >
             {loading ? 'Creating Project...' : 'Start Scraping'}
           </button>

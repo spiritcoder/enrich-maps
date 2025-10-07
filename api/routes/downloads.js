@@ -1,52 +1,97 @@
 const express = require('express');
-const path = require('path');
-const fs = require('fs').promises;
 const { authenticateToken } = require('../middleware/auth');
 const Project = require('../models/Project');
+const { MongoClient } = require('mongodb');
+const ExcelJS = require('exceljs');
 
 const router = express.Router();
 
-// Serve download files
-router.get('/:filename', authenticateToken, async (req, res) => {
+// Generate and stream Excel file on-demand
+router.get('/:projectId', authenticateToken, async (req, res) => {
   try {
-    const { filename } = req.params;
-    const uploadDir = process.env.UPLOAD_DIR || './uploads';
-    const filepath = path.join(uploadDir, filename);
-
-    // Extract project ID from filename (format: keyword_projectId_timestamp.xlsx)
-    const projectId = filename.split('_')[1];
+    const { projectId } = req.params;
     
-    if (!projectId) {
-      return res.status(400).json({ error: 'Invalid filename format' });
-    }
-
     // Verify user owns this project
     const projectModel = new Project();
     await projectModel.init();
     const project = await projectModel.findById(projectId);
-    await projectModel.close();
-
+    
     if (!project) {
+      await projectModel.close();
       return res.status(404).json({ error: 'Project not found' });
     }
 
     if (project.userId.toString() !== req.user._id.toString()) {
+      await projectModel.close();
       return res.status(403).json({ error: 'Access denied' });
     }
 
-    // Check if file exists
-    try {
-      await fs.access(filepath);
-    } catch (error) {
-      return res.status(404).json({ error: 'File not found or expired' });
+    // Connect to project database
+    const client = new MongoClient(process.env.MONGODB_URI || 'mongodb://localhost:27017');
+    await client.connect();
+    const db = client.db(`saas_${projectId}`);
+    const businessCollection = db.collection('businesses');
+    
+    // Get all businesses for this project
+    const businesses = await businessCollection.find({ project_id: projectId }).toArray();
+    
+    if (businesses.length === 0) {
+      await client.close();
+      await projectModel.close();
+      return res.status(404).json({ error: 'No data found for this project' });
     }
 
-    // Set headers for download
+    // Create Excel workbook in memory
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Businesses');
+    
+    // Get all unique fields from businesses (default + enriched)
+    const allFields = new Set(['name', 'phone', 'website', 'address', 'rating', 'review_count', 'country', 'subdivision']);
+    businesses.forEach(business => {
+      Object.keys(business).forEach(key => {
+        if (!key.startsWith('_') && !['project_id', 'processed_at', 'enriched', 'enriched_at', 'enrichment_provider', 'enrichment_fields', 'enrichment_error'].includes(key)) {
+          allFields.add(key);
+        }
+      });
+    });
+    
+    const columns = Array.from(allFields);
+    
+    // Set up columns
+    worksheet.columns = columns.map(field => ({
+      header: field.charAt(0).toUpperCase() + field.slice(1).replace(/_/g, ' '),
+      key: field,
+      width: 20
+    }));
+    
+    // Add data rows
+    businesses.forEach(business => {
+      const row = {};
+      columns.forEach(field => {
+        row[field] = business[field] || '';
+      });
+      worksheet.addRow(row);
+    });
+    
+    // Style the header row
+    worksheet.getRow(1).font = { bold: true };
+    worksheet.getRow(1).fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FFE0E0E0' }
+    };
+    
+    await client.close();
+    await projectModel.close();
+    
+    // Set response headers for download
+    const filename = `${project.searchTerm || 'businesses'}_${projectId}_${Date.now()}.xlsx`;
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-
-    // Stream file
-    res.sendFile(path.resolve(filepath));
+    
+    // Stream Excel file directly to response
+    await workbook.xlsx.write(res);
+    res.end();
 
   } catch (error) {
     console.error('Download error:', error);

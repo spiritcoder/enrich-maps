@@ -1,7 +1,7 @@
 const express = require('express');
 const Project = require('../models/Project');
 const { authenticateToken } = require('../middleware/auth');
-const { createScrapingJob } = require('../../services/JobQueue');
+
 
 const router = express.Router();
 
@@ -11,34 +11,45 @@ router.use(authenticateToken);
 // Create new project
 router.post('/', async (req, res) => {
   try {
-    const { keyword, locations, fields, filters } = req.body;
+    const { searchTerm, locations, businessLimit, enrichment } = req.body;
 
     // Validation
-    if (!keyword || !locations || !Array.isArray(locations) || locations.length === 0) {
-      return res.status(400).json({ error: 'Keyword and locations are required' });
+    if (!searchTerm || !locations || !Array.isArray(locations) || locations.length === 0 || !businessLimit) {
+      return res.status(400).json({ error: 'Search term, locations, and business limit are required' });
     }
 
-    // Check user usage limits with estimation
-    const user = req.user;
-    const estimatedBusinesses = locations.length * 20; // Conservative estimate
+    if (businessLimit < 1 || businessLimit > 10000) {
+      return res.status(400).json({ error: 'Business limit must be between 1 and 10,000' });
+    }
+
+    // Calculate exact costs
+    const baseCost = businessLimit;
+    let enrichmentCost = 0;
     
-    const userModel = new User();
-    await userModel.init();
-    const availableLimit = await userModel.getAvailableLimit(user._id);
-    await userModel.close();
-    
-    if (availableLimit <= 0) {
-      return res.status(403).json({ 
-        error: 'No available credits or subscription limit remaining',
-        availableLimit: 0
-      });
+    if (enrichment?.enabled && enrichment.aiProvider) {
+      const { AI_PROVIDERS } = require('../../config/enrichment-config');
+      const provider = AI_PROVIDERS[enrichment.aiProvider];
+      if (!provider) {
+        return res.status(400).json({ error: 'Invalid AI provider' });
+      }
+      enrichmentCost = businessLimit * provider.costPerBusiness;
     }
     
-    if (estimatedBusinesses > availableLimit) {
-      return res.status(403).json({ 
-        error: `Estimated ${estimatedBusinesses} businesses exceeds your available limit of ${availableLimit}`,
-        availableLimit,
-        estimated: estimatedBusinesses
+    const totalCost = baseCost + enrichmentCost;
+    const user = req.user;
+    const availableCredits = (user.subscription?.monthlyLimit || 50) + (user.credits?.balance || 0) - user.usage.currentMonth;
+
+    if (totalCost > availableCredits) {
+      return res.status(400).json({ 
+        error: 'Insufficient credits',
+        required: totalCost,
+        available: availableCredits,
+        shortfall: totalCost - availableCredits,
+        breakdown: {
+          baseCost,
+          enrichmentCost,
+          totalCost
+        }
       });
     }
 
@@ -48,18 +59,30 @@ router.post('/', async (req, res) => {
     // Create project
     const projectData = {
       userId: user._id,
-      keyword,
+      name: `${searchTerm} - ${locations.length} location${locations.length > 1 ? 's' : ''}`,
+      searchTerm,
       locations,
-      fields: fields || ['name', 'phone', 'website', 'address', 'rating'],
-      filters: filters || { minRating: 4.0, minReviews: 5 },
-      estimatedCount: locations.length * 50 // Rough estimate per location
+      businessLimit,
+      enrichment: enrichment || { enabled: false },
+      costs: {
+        baseCost,
+        enrichmentCost,
+        totalCost
+      }
     };
 
     const project = await projectModel.create(projectData);
     await projectModel.close();
 
     // Add to job queue
-    await createScrapingJob(project._id.toString(), projectData);
+    const { createScrapingJob } = require('../../services/JobQueue');
+    await createScrapingJob(project._id.toString(), {
+      projectId: project._id.toString(),
+      searchTerm,
+      locations,
+      businessLimit,
+      enrichment
+    });
 
     res.status(201).json({
       message: 'Project created successfully',

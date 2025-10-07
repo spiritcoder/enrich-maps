@@ -3,13 +3,20 @@ const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const UserAgent = require('user-agents');
 const config = require('../config/scraper');
 const ProxyManager = require('../services/ProxyManager');
-const NicheLoader = require('../config/niche-loader');
 
 puppeteer.use(StealthPlugin());
 
 class GenericGoogleMapsParser {
   constructor(rateLimiter, niche = null) {
-    this.niche = niche || NicheLoader.getCurrentNiche();
+    // Default niche config for when no niche is provided
+    this.niche = niche || {
+      name: 'generic',
+      search: { maxPerSearch: 100 },
+      validation: {
+        includeKeywords: [],
+        excludeKeywords: []
+      }
+    };
     this.proxyManager = new ProxyManager();
     this.rateLimiter = rateLimiter;
     this.browser = null;
@@ -181,6 +188,11 @@ class GenericGoogleMapsParser {
   isValidBusiness(name, categories = []) {
     if (!name) return false;
     
+    // If no validation keywords are set, accept all businesses
+    if (!this.niche.validation.includeKeywords || this.niche.validation.includeKeywords.length === 0) {
+      return true;
+    }
+    
     const nameLower = name.toLowerCase();
     
     // Check categories first
@@ -192,7 +204,7 @@ class GenericGoogleMapsParser {
     }
     
     // Check exclude keywords
-    if (this.niche.validation.excludeKeywords.some(keyword => nameLower.includes(keyword.toLowerCase()))) {
+    if (this.niche.validation.excludeKeywords && this.niche.validation.excludeKeywords.some(keyword => nameLower.includes(keyword.toLowerCase()))) {
       return false;
     }
     

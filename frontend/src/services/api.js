@@ -67,4 +67,11 @@ export const payments = {
   getTransactions: () => api.get('/api/payments/transactions'),
 };
 
+// Enrichment API
+export const enrichment = {
+  getProviders: () => api.get('/api/enrichment/providers'),
+  getFields: () => api.get('/api/enrichment/fields'),
+  calculateCost: (data) => api.post('/api/enrichment/calculate-cost', data),
+};
+
 export default api;
