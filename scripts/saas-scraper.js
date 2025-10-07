@@ -14,7 +14,6 @@ class SaaSScraper {
 
   async init() {
     await this.parser.init();
-    console.log(`🎯 SAAS: parser.init() completed`);
   }
 
   // New method for worker compatibility with progressive saving
@@ -25,7 +24,6 @@ class SaaSScraper {
       }
       
       const savedCount = await this.extractAndSaveBusinesses(rawCollection, query, country, subdivision, limit, progressCallback);
-      console.log(`✅ SaaSScraper saved ${savedCount} businesses`);
       return savedCount;
       
     } catch (error) {
@@ -213,7 +211,6 @@ class SaaSScraper {
     
     const availableLimit = await userModel.getAvailableLimit(userId);
     const effectiveLimit = businessLimit ? Math.min(businessLimit, availableLimit) : availableLimit;
-    console.log(`🔄 Processing raw data with limit: ${effectiveLimit} (business: ${businessLimit}, available: ${availableLimit})`);
     
     if (effectiveLimit <= 0) {
       console.log(`⚠️ No processing limit available`);
@@ -303,7 +300,6 @@ class SaaSScraper {
         
       } catch (error) {
         console.error(`❌ Failed to enrich ${business.name}:`, error.message);
-        console.error(`🔍 DEBUG: Enrichment error stack:`, error.stack);
         
         // Mark as enrichment failed
         await businessCollection.updateOne(
