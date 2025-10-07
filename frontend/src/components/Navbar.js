@@ -38,11 +38,12 @@ const Navbar = ({ user, onLogout }) => {
         </Link>
         <Link to="/dashboard" style={linkStyle}>Dashboard</Link>
         <Link to="/create-project" style={linkStyle}>New Project</Link>
+        <Link to="/billing" style={linkStyle}>Billing</Link>
       </div>
       
       <div style={{ display: 'flex', alignItems: 'center' }}>
         <span style={{ marginRight: '1rem' }}>
-          👋 {user.name} ({user.plan})
+          👋 {user.name || user.email}
         </span>
         <button style={buttonStyle} onClick={onLogout}>
           Logout

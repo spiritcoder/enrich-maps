@@ -8,6 +8,7 @@ const projectRoutes = require('./api/routes/projects');
 const userRoutes = require('./api/routes/users');
 const downloadRoutes = require('./api/routes/downloads');
 const countryRoutes = require('./api/routes/countries');
+const paymentRoutes = require('./api/routes/payments');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -28,6 +29,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/projects', projectRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/countries', countryRoutes);
+app.use('/api/payments', paymentRoutes);
 app.use('/downloads', downloadRoutes);
 
 // Health check

@@ -22,17 +22,22 @@ router.post('/', async (req, res) => {
     const user = req.user;
     const estimatedBusinesses = locations.length * 20; // Conservative estimate
     
-    if (user.usage.currentMonth >= user.usage.limit) {
+    const userModel = new User();
+    await userModel.init();
+    const availableLimit = await userModel.getAvailableLimit(user._id);
+    await userModel.close();
+    
+    if (availableLimit <= 0) {
       return res.status(403).json({ 
-        error: 'Monthly usage limit exceeded',
-        usage: user.usage
+        error: 'No available credits or subscription limit remaining',
+        availableLimit: 0
       });
     }
     
-    if (user.usage.currentMonth + estimatedBusinesses > user.usage.limit) {
+    if (estimatedBusinesses > availableLimit) {
       return res.status(403).json({ 
-        error: `Estimated ${estimatedBusinesses} businesses would exceed your monthly limit of ${user.usage.limit}`,
-        usage: user.usage,
+        error: `Estimated ${estimatedBusinesses} businesses exceeds your available limit of ${availableLimit}`,
+        availableLimit,
         estimated: estimatedBusinesses
       });
     }

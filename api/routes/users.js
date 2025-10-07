@@ -16,14 +16,19 @@ router.get('/profile', authenticateToken, async (req, res) => {
 // Get user usage stats
 router.get('/usage', authenticateToken, async (req, res) => {
   try {
-    const usage = req.user.usage;
-    const remaining = Math.max(0, usage.limit - usage.currentMonth);
+    const user = req.user;
+    const monthlyLimit = user.subscription?.monthlyLimit || 50;
+    const remaining = Math.max(0, monthlyLimit - user.usage.currentMonth);
     
     res.json({
       usage: {
-        ...usage,
+        currentMonth: user.usage.currentMonth,
+        limit: monthlyLimit,
+        resetDate: user.usage.resetDate,
         remaining,
-        percentage: Math.round((usage.currentMonth / usage.limit) * 100)
+        percentage: Math.round((user.usage.currentMonth / monthlyLimit) * 100),
+        subscription: user.subscription,
+        credits: user.credits
       }
     });
   } catch (error) {

@@ -58,4 +58,13 @@ export const countries = {
   getPopular: () => api.get('/api/countries/popular'),
 };
 
+// Payments API
+export const payments = {
+  getPlans: () => api.get('/api/payments/plans'),
+  getCreditPackages: () => api.get('/api/payments/credit-packages'),
+  purchaseCredits: (data) => api.post('/api/payments/purchase-credits', data),
+  updateSubscription: (data) => api.post('/api/payments/update-subscription', data),
+  getTransactions: () => api.get('/api/payments/transactions'),
+};
+
 export default api;

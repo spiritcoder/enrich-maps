@@ -125,16 +125,11 @@ scrapingQueue.process('scrape-project', 1, async (job) => {
         
         // Check if we're approaching the user's limit (refresh user data every 5 locations)
         if (i % 5 === 0) {
-          const updatedUser = await userModel.findById(user._id);
-          if (updatedUser) {
-            user.usage = updatedUser.usage;
+          const availableLimit = await userModel.getAvailableLimit(user._id);
+          if (availableLimit <= 0) {
+            console.log(`⚠️ User has no available credits or subscription limit, stopping scraping`);
+            break;
           }
-        }
-        
-        const currentTotal = user.usage.currentMonth + totalFound;
-        if (currentTotal >= user.usage.limit) {
-          console.log(`⚠️ User limit reached (${currentTotal}/${user.usage.limit}), stopping scraping`);
-          break;
         }
         
         console.log(`📍 Processing ${location.label} (${i + 1}/${expandedLocations.length})`);
@@ -190,7 +185,7 @@ scrapingQueue.process('scrape-project', 1, async (job) => {
     
     // Process all raw data with usage limit checks
     console.log('🔄 Processing raw data...');
-    const processed = await scraper.processRawDataWithLimits(user.usage.limit, user.usage.currentMonth);
+    const processed = await scraper.processRawDataWithLimits(user._id);
     totalProcessed = processed;
     
     // Update user usage

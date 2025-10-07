@@ -5,7 +5,11 @@ import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
 import CreateProject from './pages/CreateProject';
 import ProjectDetail from './pages/ProjectDetail';
+import Billing from './pages/Billing';
+import Plans from './pages/Plans';
+import Credits from './pages/Credits';
 import Navbar from './components/Navbar';
+import { user as userApi } from './services/api';
 
 function App() {
   const [user, setUser] = useState(null);
@@ -32,6 +36,17 @@ function App() {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
     setUser(null);
+  };
+
+  const refreshUser = async () => {
+    try {
+      const response = await userApi.getProfile();
+      const updatedUser = response.data.user;
+      localStorage.setItem('user', JSON.stringify(updatedUser));
+      setUser(updatedUser);
+    } catch (error) {
+      console.error('Error refreshing user data:', error);
+    }
   };
 
   if (loading) {
@@ -67,6 +82,18 @@ function App() {
           <Route 
             path="/project/:id" 
             element={user ? <ProjectDetail /> : <Navigate to="/login" />} 
+          />
+          <Route 
+            path="/billing" 
+            element={user ? <Billing onUserUpdate={refreshUser} /> : <Navigate to="/login" />} 
+          />
+          <Route 
+            path="/plans" 
+            element={user ? <Plans onUserUpdate={refreshUser} /> : <Navigate to="/login" />} 
+          />
+          <Route 
+            path="/credits" 
+            element={user ? <Credits onUserUpdate={refreshUser} /> : <Navigate to="/login" />} 
           />
           <Route 
             path="/" 

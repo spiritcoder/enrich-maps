@@ -115,21 +115,80 @@ const Dashboard = () => {
     <div style={containerStyle}>
       <h1 style={{ marginBottom: '2rem' }}>📊 Dashboard</h1>
 
-      {/* Usage Card */}
+      {/* Enhanced Usage Card */}
       <div style={cardStyle}>
-        <h3 style={{ marginBottom: '1rem' }}>📈 Monthly Usage</h3>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+          <h3>📈 Usage & Credits</h3>
+          <Link to="/billing" style={{ color: '#2563eb', textDecoration: 'none', fontSize: '0.9rem' }}>
+            Manage Billing →
+          </Link>
+        </div>
         {usage && (
           <>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-              <span>{usage.currentMonth} / {usage.limit} businesses</span>
-              <span>{usage.percentage}% used</span>
+            {/* Subscription Usage */}
+            <div style={{ marginBottom: '1rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                <span>Subscription: {usage.currentMonth} / {usage.subscription?.monthlyLimit || usage.limit}</span>
+                <span>{Math.round((usage.currentMonth / (usage.subscription?.monthlyLimit || usage.limit)) * 100)}%</span>
+              </div>
+              <div style={usageBarStyle}>
+                <div style={{
+                  ...usageProgressStyle,
+                  width: `${Math.min((usage.currentMonth / (usage.subscription?.monthlyLimit || usage.limit)) * 100, 100)}%`
+                }}></div>
+              </div>
             </div>
-            <div style={usageBarStyle}>
-              <div style={usageProgressStyle}></div>
+            
+            {/* Credits Display */}
+            <div style={{ 
+              display: 'flex', 
+              justifyContent: 'space-between', 
+              alignItems: 'center',
+              padding: '0.75rem',
+              background: '#f8fafc',
+              borderRadius: '6px',
+              marginBottom: '1rem'
+            }}>
+              <div>
+                <span style={{ fontWeight: 'bold' }}>💳 {usage.credits?.balance || 0} Credits</span>
+                <div style={{ fontSize: '0.8rem', color: '#6b7280' }}>Available for overages</div>
+              </div>
+              <Link 
+                to="/credits" 
+                style={{
+                  background: '#2563eb',
+                  color: 'white',
+                  padding: '0.5rem 1rem',
+                  borderRadius: '4px',
+                  textDecoration: 'none',
+                  fontSize: '0.9rem'
+                }}
+              >
+                Buy Credits
+              </Link>
             </div>
-            <p style={{ fontSize: '0.9rem', color: '#6b7280', marginTop: '0.5rem' }}>
-              {usage.remaining} businesses remaining this month
-            </p>
+            
+            {/* Plan Info */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: '0.9rem', color: '#6b7280' }}>
+                Current Plan: <strong>{usage.subscription?.plan || 'Free'}</strong>
+              </span>
+              {usage.subscription?.plan === 'free' && (
+                <Link 
+                  to="/plans"
+                  style={{
+                    background: '#10b981',
+                    color: 'white',
+                    padding: '0.5rem 1rem',
+                    borderRadius: '4px',
+                    textDecoration: 'none',
+                    fontSize: '0.9rem'
+                  }}
+                >
+                  Upgrade
+                </Link>
+              )}
+            </div>
           </>
         )}
       </div>

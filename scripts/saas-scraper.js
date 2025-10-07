@@ -114,15 +114,20 @@ class SaaSScraper {
     return processed;
   }
 
-  async processRawDataWithLimits(userLimit, currentUsage) {
-    console.log(`🔄 Processing raw data with limit check (${currentUsage}/${userLimit})...`);
+  async processRawDataWithLimits(userId) {
+    const User = require('../api/models/User');
+    const userModel = new User();
+    await userModel.init();
+    
+    const availableLimit = await userModel.getAvailableLimit(userId);
+    console.log(`🔄 Processing raw data with available limit: ${availableLimit}`);
     
     let processed = 0;
     let batchCount = 0;
-    const remainingLimit = userLimit - currentUsage;
     
-    if (remainingLimit <= 0) {
-      console.log(`⚠️ User has reached monthly limit, skipping processing`);
+    if (availableLimit <= 0) {
+      console.log(`⚠️ User has no available credits or subscription limit, skipping processing`);
+      await userModel.close();
       return 0;
     }
     
@@ -135,8 +140,10 @@ class SaaSScraper {
       
       for (const rawData of batch) {
         // Check if we've reached the user's limit
-        if (processed >= remainingLimit) {
-          console.log(`⚠️ Reached user's monthly limit (${userLimit}), stopping processing`);
+        const currentAvailable = await userModel.getAvailableLimit(userId);
+        if (currentAvailable <= 0) {
+          console.log(`⚠️ User has no more available credits or subscription limit, stopping processing`);
+          await userModel.close();
           return processed;
         }
         
@@ -149,7 +156,7 @@ class SaaSScraper {
             if (!isDuplicate) {
               await this.insertBusiness(cleanData, rawData._id);
               processed++;
-              console.log(`📊 Processed ${processed}/${remainingLimit} (limit check)`);
+              console.log(`📊 Processed ${processed} businesses (credit system)`);
             }
           }
           
@@ -162,7 +169,8 @@ class SaaSScraper {
       }
     }
     
-    console.log(`✅ Processed ${processed} businesses (within limit)`);
+    await userModel.close();
+    console.log(`✅ Processed ${processed} businesses (within available limit)`);
     return processed;
   }
 

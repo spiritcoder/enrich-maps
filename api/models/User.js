@@ -30,10 +30,22 @@ class User {
       email: email.toLowerCase(),
       password: hashedPassword,
       name,
-      plan: 'free',
+      subscription: {
+        plan: 'free',
+        status: 'active',
+        monthlyLimit: 50,
+        stripeSubscriptionId: null,
+        currentPeriodStart: new Date(),
+        currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+      },
+      credits: {
+        balance: 0,
+        totalPurchased: 0,
+        totalUsed: 0
+      },
       usage: {
         currentMonth: 0,
-        limit: 100,
+        limit: 50,
         resetDate: new Date(new Date().getFullYear(), new Date().getMonth() + 1, 1)
       },
       createdAt: new Date(),
@@ -79,6 +91,28 @@ class User {
       }
     );
 
+    // Get user to check limits
+    const user = await this.findById(userId);
+    let creditsUsed = 0;
+    
+    // Check if over subscription limit
+    if (user.usage.currentMonth >= user.subscription.monthlyLimit) {
+      // Use credits for overage
+      const overage = Math.min(increment, user.credits.balance);
+      if (overage > 0) {
+        creditsUsed = overage;
+        await this.collection.updateOne(
+          { _id: new ObjectId(userId) },
+          { 
+            $inc: { 
+              'credits.balance': -creditsUsed,
+              'credits.totalUsed': creditsUsed
+            }
+          }
+        );
+      }
+    }
+
     // Increment usage
     return await this.collection.updateOne(
       { _id: new ObjectId(userId) },
@@ -87,6 +121,47 @@ class User {
         $set: { updatedAt: new Date() }
       }
     );
+  }
+
+  async addCredits(userId, amount, description = 'Credit purchase') {
+    const { ObjectId } = require('mongodb');
+    
+    // Add credits to user
+    await this.collection.updateOne(
+      { _id: new ObjectId(userId) },
+      { 
+        $inc: { 
+          'credits.balance': amount,
+          'credits.totalPurchased': amount
+        },
+        $set: { updatedAt: new Date() }
+      }
+    );
+    
+    // Log transaction
+    await this.logCreditTransaction(userId, 'purchase', amount, description);
+  }
+
+  async logCreditTransaction(userId, type, amount, description, projectId = null) {
+    const { ObjectId } = require('mongodb');
+    const transactionsCollection = this.db.collection('credit_transactions');
+    
+    await transactionsCollection.insertOne({
+      userId: new ObjectId(userId),
+      type,
+      amount,
+      description,
+      projectId: projectId ? new ObjectId(projectId) : null,
+      createdAt: new Date()
+    });
+  }
+
+  async getAvailableLimit(userId) {
+    const user = await this.findById(userId);
+    if (!user) return 0;
+    
+    const subscriptionRemaining = Math.max(0, user.subscription.monthlyLimit - user.usage.currentMonth);
+    return subscriptionRemaining + user.credits.balance;
   }
 
   async close() {
