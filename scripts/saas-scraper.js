@@ -31,6 +31,41 @@ class SaaSScraper {
       return 0;
     }
   }
+
+  async scrapeWithLocationLimits(rawCollection, locations, searchTerm, businessLimit, businessesPerLocation = null, progressCallback = null) {
+    let totalSaved = 0;
+    let remainingLimit = businessLimit;
+    
+    for (const location of locations) {
+      if (remainingLimit <= 0) break;
+      
+      // Calculate limit for this location
+      let locationLimit = businessesPerLocation || remainingLimit;
+      locationLimit = Math.min(locationLimit, remainingLimit);
+      
+      const query = location.subdivision 
+        ? `${searchTerm} ${location.subdivision}, ${location.country}`
+        : `${searchTerm} ${location.country}`;
+      
+      console.log(`📍 Scraping: ${query} (limit: ${locationLimit})`);
+      
+      const savedCount = await this.scrapeBusinesses(
+        rawCollection, 
+        query, 
+        location.country, 
+        location.subdivision, 
+        locationLimit, 
+        progressCallback
+      );
+      
+      totalSaved += savedCount;
+      remainingLimit -= savedCount;
+      
+      console.log(`✅ Saved ${savedCount} businesses in ${location.label} (${remainingLimit} remaining)`);
+    }
+    
+    return totalSaved;
+  }
   
   async extractAndSaveBusinesses(rawCollection, query, country, subdivision, limit, progressCallback = null) {
     const page = await this.parser.browser.newPage();
@@ -109,7 +144,7 @@ class SaaSScraper {
     return savedCount;
   }
 
-  async scrapeCountry(rawCollection, country, searchTerm, progressCallback = null) {
+  async scrapeCountry(rawCollection, country, searchTerm, businessesPerLocation = null, progressCallback = null) {
     console.log(`🌍 Starting scraping for ${country.name}`);
     
     try {
@@ -121,7 +156,8 @@ class SaaSScraper {
           const query = `${searchTerm} ${subdivision}, ${country.name}`;
           console.log(`📍 Scraping: ${query}`);
           
-          const savedCount = await this.scrapeBusinesses(rawCollection, query, country.name, subdivision, 100, progressCallback);
+          const limit = businessesPerLocation || 100;
+          const savedCount = await this.scrapeBusinesses(rawCollection, query, country.name, subdivision, limit, progressCallback);
           countryResults.found += savedCount;
           this.results.found += savedCount;
 

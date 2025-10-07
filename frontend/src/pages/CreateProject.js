@@ -7,6 +7,7 @@ const CreateProject = () => {
   const [formData, setFormData] = useState({
     searchTerm: '',
     businessLimit: '100',
+    businessesPerLocation: '',
     locations: [],
     fields: ['name', 'phone', 'website', 'address', 'rating'],
     enrichment: {
@@ -87,10 +88,19 @@ const CreateProject = () => {
       return;
     }
 
+    // Validate per location limit if provided
+    const businessesPerLocation = formData.businessesPerLocation ? parseInt(formData.businessesPerLocation) : null;
+    if (businessesPerLocation && (businessesPerLocation < 1 || businessesPerLocation > 1000)) {
+      setError('Per location limit must be between 1 and 1,000');
+      setLoading(false);
+      return;
+    }
+
     try {
       const submitData = {
         ...formData,
-        businessLimit // Convert to number for submission
+        businessLimit, // Convert to number for submission
+        businessesPerLocation: businessesPerLocation || null
       };
       const response = await projects.create(submitData);
       navigate(`/project/${response.data.project._id}`);
@@ -261,14 +271,14 @@ const CreateProject = () => {
         {/* Niche & Business Limit Section */}
         <div style={cardStyle}>
           <h3 style={{ marginBottom: '1rem' }}>🔍 What to Scrape</h3>
-          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '1rem' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: '1rem' }}>
             <div>
               <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 'bold' }}>
-                What type of business are you looking for?
+                What business are you looking for?
               </label>
               <input
                 type="text"
-                placeholder="e.g., asian massage, pizza restaurant, dentist"
+                placeholder="e.g.pizza restaurant, dentist"
                 value={formData.searchTerm}
                 onChange={(e) => setFormData(prev => ({ ...prev, searchTerm: e.target.value }))}
                 style={inputStyle}
@@ -277,7 +287,7 @@ const CreateProject = () => {
             </div>
             <div>
               <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 'bold' }}>
-                Business Limit
+                Total Business Limit
               </label>
               <input
                 type="text"
@@ -294,9 +304,28 @@ const CreateProject = () => {
                 required
               />
             </div>
+            <div>
+              <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 'bold' }}>
+                Per Location Limit
+              </label>
+              <input
+                type="text"
+                placeholder="Optional (1-1000)"
+                value={formData.businessesPerLocation || ''}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  // Allow empty or numbers only
+                  if (value === '' || /^\d+$/.test(value)) {
+                    setFormData(prev => ({ ...prev, businessesPerLocation: value }));
+                  }
+                }}
+                style={inputStyle}
+              />
+            </div>
           </div>
           <p style={{ fontSize: '0.9rem', color: '#6b7280', marginTop: '0.5rem' }}>
-            Specify exactly how many businesses you want to scrape (1-10,000)
+            <strong>Total:</strong> Maximum businesses across all locations (1-10,000)<br/>
+            <strong>Per Location:</strong> Optional limit per location for better distribution
           </p>
         </div>
 

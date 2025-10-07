@@ -192,6 +192,10 @@ const ProjectDetail = () => {
           <div>
             <h4 style={{ marginBottom: '0.5rem' }}>🔍 Search Details</h4>
             <p><strong>Search Term:</strong> {project.searchTerm || project.keyword}</p>
+            <p><strong>Business Limit:</strong> {project.businessLimit?.toLocaleString()}</p>
+            {project.businessesPerLocation && (
+              <p><strong>Per Location:</strong> {project.businessesPerLocation?.toLocaleString()}</p>
+            )}
             <p><strong>Locations:</strong> {project.locations?.map(l => l.label || l).join(', ') || project.countries?.join(', ')}</p>
             <p><strong>Created:</strong> {new Date(project.createdAt).toLocaleString()}</p>
           </div>

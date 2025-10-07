@@ -11,7 +11,7 @@ router.use(authenticateToken);
 // Create new project
 router.post('/', async (req, res) => {
   try {
-    const { searchTerm, locations, businessLimit, enrichment } = req.body;
+    const { searchTerm, locations, businessLimit, businessesPerLocation, enrichment } = req.body;
 
     // Validation
     if (!searchTerm || !locations || !Array.isArray(locations) || locations.length === 0 || !businessLimit) {
@@ -63,6 +63,7 @@ router.post('/', async (req, res) => {
       searchTerm,
       locations,
       businessLimit,
+      businessesPerLocation: businessesPerLocation || null,
       enrichment: enrichment || { enabled: false },
       costs: {
         baseCost,
@@ -81,6 +82,7 @@ router.post('/', async (req, res) => {
       searchTerm,
       locations,
       businessLimit,
+      businessesPerLocation,
       enrichment
     });
 

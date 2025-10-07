@@ -8,7 +8,7 @@ const { getCountriesForScraping } = require('../utils/countries-loader');
 // Process scraping jobs
 scrapingQueue.process('scrape-project', async (job) => {
   try {    
-    const { projectId, searchTerm, locations, businessLimit, enrichment } = job.data;
+    const { projectId, searchTerm, locations, businessLimit, businessesPerLocation, enrichment } = job.data;
     
     // Step 2.1: Pre-Processing Credit Validation
     const projectModel = new Project();
@@ -69,35 +69,30 @@ scrapingQueue.process('scrape-project', async (job) => {
       }
     }
     
-    // Scrape each location with progressive saving
+    // Use new location-aware scraping method
     console.log(`🔄 Starting scraping for ${expandedLocations.length} locations`);
-    for (const location of expandedLocations) {
-      if (totalFound >= businessLimit) break;
-
-      const query = `${searchTerm} ${location.subdivision}, ${location.country}`;
+    console.log(`📊 Business limit: ${businessLimit}, Per location: ${businessesPerLocation || 'unlimited'}`);
+    
+    // Progress callback for real-time updates
+    const progressCallback = async (savedCount) => {
+      totalFound++;
+      const progressPercent = Math.min(Math.round((totalFound / businessLimit) * 100), 99);
+      await job.progress(progressPercent);
       
-      // Progress callback for real-time updates
-      const progressCallback = async (savedCount) => {
-        totalFound++;
-        const progressPercent = Math.min(Math.round((totalFound / businessLimit) * 100), 99);
-        await job.progress(progressPercent);
-        
-        await projectModel.updateResults(projectId, {
-          found: totalFound,
-          processed: totalProcessed
-        });
-      };
-      
-      const savedCount = await scraper.scrapeBusinesses(
-        rawCollection,
-        query,
-        location.country,
-        location.subdivision,
-        businessLimit - totalFound,
-        progressCallback
-      );
-      
-    }
+      await projectModel.updateResults(projectId, {
+        found: totalFound,
+        processed: totalProcessed
+      });
+    };
+    
+    totalFound = await scraper.scrapeWithLocationLimits(
+      rawCollection,
+      expandedLocations,
+      searchTerm,
+      businessLimit,
+      businessesPerLocation,
+      progressCallback
+    );
     
     // Process raw data using SaaSScraper's methods
     totalProcessed = await scraper.processRawData(db, businessLimit);
