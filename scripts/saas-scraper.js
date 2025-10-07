@@ -254,9 +254,7 @@ class SaaSScraper {
 
   async enrichBusinessData(db, enrichmentConfig, businessLimit = null) {
     const AIEnrichmentService = require('../services/AIEnrichmentService');
-    
-    console.log(`🔍 DEBUG: Enrichment config:`, enrichmentConfig);
-    
+        
     if (!enrichmentConfig.enabled || !enrichmentConfig.fields || enrichmentConfig.fields.length === 0) {
       console.log('⚠️ Enrichment not enabled or no fields selected');
       return 0;
@@ -273,24 +271,17 @@ class SaaSScraper {
     
     // Get businesses that need enrichment
     const query = { project_id: this.projectId, enriched: { $ne: true } };
-    console.log(`🔍 DEBUG: Enrichment query:`, query);
     
     const businesses = await businessCollection
       .find(query)
       .limit(businessLimit || 1000)
       .toArray();
-    
-    console.log(`🤖 Enriching ${businesses.length} businesses with ${enrichmentConfig.aiProvider}`);
-    console.log(`🔍 DEBUG: First business:`, businesses[0] ? { _id: businesses[0]._id, name: businesses[0].name, project_id: businesses[0].project_id } : 'None');
-    
+
     let enrichedCount = 0;
     
     for (const business of businesses) {
-      try {
-        console.log(`🔄 Enriching: ${business.name}`);
-        
+      try {        
         const enrichedData = await aiService.enrichBusiness(business, enrichmentConfig.fields);
-        console.log(`🔍 DEBUG: Enriched data for ${business.name}:`, enrichedData);
         
         // Update business with enriched data
         const updateResult = await businessCollection.updateOne(
@@ -304,12 +295,8 @@ class SaaSScraper {
               enrichment_fields: enrichmentConfig.fields
             }
           }
-        );
-        
-        console.log(`🔍 DEBUG: Update result for ${business.name}:`, { matchedCount: updateResult.matchedCount, modifiedCount: updateResult.modifiedCount });
-        
+        );        
         enrichedCount++;
-        console.log(`✨ Enriched ${enrichedCount}/${businesses.length}: ${business.name}`);
         
         // Small delay to avoid rate limits
         await new Promise(resolve => setTimeout(resolve, 1000));

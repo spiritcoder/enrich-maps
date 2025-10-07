@@ -4,7 +4,6 @@ const User = require('../api/models/User');
 const SaaSScraper = require('../scripts/saas-scraper');
 const { getCountriesForScraping } = require('../utils/countries-loader');
 
-console.log('🔄 Starting scraper worker...');
 
 // Process scraping jobs
 scrapingQueue.process('scrape-project', async (job) => {
@@ -37,21 +36,16 @@ scrapingQueue.process('scrape-project', async (job) => {
     console.log(`💳 Credits available: ${availableCredits}, required: ${project.costs.totalCost}`);
     
     // Create database connection
-    console.log(`💾 Connecting to MongoDB...`);
     const { MongoClient } = require('mongodb');
     const client = new MongoClient(process.env.MONGODB_URI || 'mongodb://localhost:27017');
     await client.connect();
-    console.log(`✅ MongoDB connected`);
     
     const dbName = `saas_${projectId}`;
     const db = client.db(dbName);
     const rawCollection = db.collection('raw_data');
-    const businessCollection = db.collection('businesses');
     
     // Initialize SaaSScraper
-    console.log(`🔍 Initializing SaaSScraper...`);
     const scraper = new SaaSScraper(projectId);
-    console.log(`✅ SaaSScraper initialized`);
     
     let totalFound = 0;
     let totalProcessed = 0;
@@ -79,9 +73,7 @@ scrapingQueue.process('scrape-project', async (job) => {
     console.log(`🔄 Starting scraping for ${expandedLocations.length} locations`);
     for (const location of expandedLocations) {
       if (totalFound >= businessLimit) break;
-      
-      console.log(`📍 Scraping ${location.label}`);
-      
+
       const query = `${searchTerm} ${location.subdivision}, ${location.country}`;
       
       // Progress callback for real-time updates
@@ -105,17 +97,13 @@ scrapingQueue.process('scrape-project', async (job) => {
         progressCallback
       );
       
-      console.log(`📊 Saved ${savedCount} businesses for ${location.label}`);
     }
     
     // Process raw data using SaaSScraper's methods
-    console.log('🔄 Processing raw data with duplicate detection...');
     totalProcessed = await scraper.processRawData(db, businessLimit);
-    console.log(`📊 Processed ${totalProcessed} businesses (after duplicate removal)`);
     
     // Step 2.2: Scraping Phase Credit Management
     await userModel.updateUsage(user._id, totalProcessed);
-    console.log(`📊 Updated user usage: +${totalProcessed} businesses`);
     
     // Step 2.3: Enrichment Phase Credit Management
     let enrichedCount = 0;
@@ -130,11 +118,8 @@ scrapingQueue.process('scrape-project', async (job) => {
       
       if (enrichmentCost > remainingCredits) {
         console.log(`⚠️ Insufficient credits for enrichment: need ${enrichmentCost}, have ${remainingCredits}`);
-        console.log(`ℹ️ Skipping enrichment phase`);
       } else {
-        console.log(`🤖 Starting AI enrichment with ${enrichment.aiProvider}...`);
         enrichedCount = await scraper.enrichBusinessData(db, enrichment, totalProcessed);
-        console.log(`✨ Enriched ${enrichedCount} businesses`);
         
         // Deduct enrichment credits immediately after enrichment
         const actualEnrichmentCost = enrichedCount * enrichmentRate;
@@ -158,7 +143,6 @@ scrapingQueue.process('scrape-project', async (job) => {
     
   } catch (error) {
     console.error(`❌ Job ${job.id} failed:`, error.message);
-    console.error(`❌ Stack trace:`, error.stack);
     
     // Step 4.1: Error Handling - Mark project as failed
     try {
