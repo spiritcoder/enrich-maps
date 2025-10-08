@@ -5,6 +5,107 @@ const SaaSScraper = require('../scripts/saas-scraper');
 const { getCountriesForScraping } = require('../utils/countries-loader');
 
 
+// Process enrichment jobs
+scrapingQueue.process('enrich-project', async (job) => {
+  try {
+    const { projectId, enrichment, businessCount, enrichmentCost } = job.data;
+    
+    const projectModel = new Project();
+    await projectModel.init();
+    
+    const project = await projectModel.findById(projectId);
+    if (!project) {
+      throw new Error(`Project not found: ${projectId}`);
+    }
+    
+    const userModel = new User();
+    await userModel.init();
+    const user = await userModel.findById(project.userId);
+    if (!user) {
+      throw new Error(`User not found: ${project.userId}`);
+    }
+    
+    // Connect to project database to get actual business count
+    const { MongoClient } = require('mongodb');
+    const client = new MongoClient(process.env.MONGODB_URI || 'mongodb://localhost:27017');
+    await client.connect();
+    
+    const db = client.db(`saas_${projectId}`);
+    const businessCollection = db.collection('businesses');
+    
+    // Get actual business count from database
+    const actualBusinessCount = await businessCollection.countDocuments({ project_id: projectId });
+    
+    if (actualBusinessCount === 0) {
+      await client.close();
+      throw new Error('No businesses found to enrich');
+    }
+    
+    // Calculate actual enrichment cost
+    const { AI_PROVIDERS } = require('../config/enrichment-config');
+    const provider = AI_PROVIDERS[enrichment.aiProvider];
+    const actualEnrichmentCost = actualBusinessCount * (provider?.costPerBusiness || 0);
+    
+    // Validate credits with actual cost
+    const availableCredits = (user.subscription?.monthlyLimit || 50) + (user.credits?.balance || 0) - user.usage.currentMonth;
+    if (actualEnrichmentCost > availableCredits) {
+      await client.close();
+      throw new Error(`Insufficient credits: need ${actualEnrichmentCost}, have ${availableCredits}`);
+    }
+    
+    console.log(`💳 Starting enrichment: ${actualBusinessCount} businesses, ${actualEnrichmentCost} credits`);
+    
+    // Initialize SaaSScraper for enrichment
+    const scraper = new SaaSScraper(projectId);
+    
+    // Enrich all businesses (force enrichment for post-processing)
+    const enrichedCount = await scraper.enrichBusinessData(db, enrichment, actualBusinessCount, true);
+    
+    // Deduct credits based on actual enriched count
+    const finalCost = enrichedCount * (provider?.costPerBusiness || 0);
+    await userModel.updateUsage(user._id, finalCost);
+    
+    await client.close();
+    
+    // Complete enrichment
+    await projectModel.updateStatus(projectId, 'completed', { 
+      enrichedAt: new Date(),
+      lastEnrichment: {
+        provider: enrichment.aiProvider,
+        fields: enrichment.fields,
+        businessCount: enrichedCount,
+        cost: finalCost
+      }
+    });
+    
+    await projectModel.updateProgress(projectId, actualBusinessCount, actualBusinessCount, enrichedCount);
+    
+    await projectModel.close();
+    await userModel.close();
+    
+    console.log(`✅ Enrichment job ${job.id} completed: ${enrichedCount} businesses enriched`);
+    return { success: true, enrichedCount, cost: finalCost };
+    
+  } catch (error) {
+    console.error(`❌ Enrichment job ${job.id} failed:`, error.message);
+    
+    // Reset project status to completed (don't mark as failed for enrichment errors)
+    try {
+      const projectModel = new Project();
+      await projectModel.init();
+      await projectModel.updateStatus(job.data.projectId, 'completed', {
+        enrichmentError: error.message,
+        enrichmentFailedAt: new Date()
+      });
+      await projectModel.close();
+    } catch (updateError) {
+      console.error('Failed to update project status:', updateError.message);
+    }
+    
+    throw error;
+  }
+});
+
 // Process scraping jobs
 scrapingQueue.process('scrape-project', async (job) => {
   try {    

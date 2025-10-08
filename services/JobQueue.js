@@ -36,8 +36,10 @@ const scrapingQueue = new Queue('scraping jobs', {
 // Job creation
 const createScrapingJob = async (projectId, jobData) => {
   try {
+    // Determine job type from jobData
+    const jobType = jobData.jobType || 'scrape-project';
     
-    const job = await scrapingQueue.add('scrape-project', {
+    const job = await scrapingQueue.add(jobType, {
       projectId,
       ...jobData
     }, {
@@ -53,8 +55,8 @@ const createScrapingJob = async (projectId, jobData) => {
     return job;
 
   } catch (error) {
-    console.error('🎯 QUEUE: Error creating scraping job:', error);
-    console.error('Error creating scraping job:', error);
+    console.error('🎯 QUEUE: Error creating job:', error);
+    console.error('Error creating job:', error);
     throw error;
   }
 };

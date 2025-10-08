@@ -50,6 +50,7 @@ export const projects = {
   list: () => api.get('/api/projects'),
   get: (id) => api.get(`/api/projects/${id}`),
   delete: (id) => api.delete(`/api/projects/${id}`),
+  enrich: (id, enrichmentData) => api.post(`/api/projects/${id}/enrich`, enrichmentData),
 };
 
 // Countries API

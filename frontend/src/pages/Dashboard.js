@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { projects, user } from '../services/api';
+import EnrichmentModal from '../components/EnrichmentModal';
 
 const Dashboard = () => {
   const [projectList, setProjectList] = useState([]);
   const [usage, setUsage] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [enrichmentModal, setEnrichmentModal] = useState({ show: false, project: null });
 
   useEffect(() => {
     loadData();
@@ -39,6 +41,14 @@ const Dashboard = () => {
       console.error('Error deleting project:', error);
       alert('Failed to delete project. Please try again.');
     }
+  };
+
+  const handleEnrichProject = (project) => {
+    setEnrichmentModal({ show: true, project });
+  };
+
+  const closeEnrichmentModal = () => {
+    setEnrichmentModal({ show: false, project: null });
   };
 
 
@@ -237,17 +247,33 @@ const Dashboard = () => {
                   </div>
                 )}
               </div>
-              <ProjectActions project={project} onDelete={() => handleDeleteProject(project._id)} />
+              <ProjectActions 
+                project={project} 
+                onDelete={() => handleDeleteProject(project._id)}
+                onEnrich={() => handleEnrichProject(project)}
+              />
             </div>
           ))
         )}
       </div>
+
+      {/* Enrichment Modal */}
+      {enrichmentModal.show && (
+        <EnrichmentModal 
+          project={enrichmentModal.project}
+          onClose={closeEnrichmentModal}
+          onSuccess={() => {
+            closeEnrichmentModal();
+            loadData(); // Refresh data
+          }}
+        />
+      )}
     </div>
   );
 };
 
 // Project Actions Dropdown Component
-const ProjectActions = ({ project, onDelete }) => {
+const ProjectActions = ({ project, onDelete, onEnrich }) => {
   const [showDropdown, setShowDropdown] = useState(false);
 
   const dropdownStyle = {
@@ -331,6 +357,17 @@ const ProjectActions = ({ project, onDelete }) => {
             >
               👁️ View Details
             </Link>
+            {project.status === 'completed' && project.results?.processed > 0 && (
+              <button 
+                style={menuItemStyle}
+                onClick={() => {
+                  setShowDropdown(false);
+                  onEnrich();
+                }}
+              >
+                🤖 Enrich Data
+              </button>
+            )}
             <button 
               style={deleteItemStyle}
               onClick={() => {

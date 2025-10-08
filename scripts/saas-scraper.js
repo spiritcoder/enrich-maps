@@ -285,7 +285,7 @@ class SaaSScraper {
     return false;
   }
 
-  async enrichBusinessData(db, enrichmentConfig, businessLimit = null) {
+  async enrichBusinessData(db, enrichmentConfig, businessLimit = null, forceEnrich = false) {
     const AIEnrichmentService = require('../services/AIEnrichmentService');
         
     if (!enrichmentConfig.enabled || !enrichmentConfig.fields || enrichmentConfig.fields.length === 0) {
@@ -302,8 +302,10 @@ class SaaSScraper {
     const aiService = new AIEnrichmentService(enrichmentConfig.aiProvider, apiKey);
     const businessCollection = db.collection('businesses');
     
-    // Get businesses that need enrichment
-    const query = { project_id: this.projectId, enriched: { $ne: true } };
+    // Get businesses - different query based on context
+    const query = forceEnrich 
+      ? { project_id: this.projectId }  // All businesses for post-processing
+      : { project_id: this.projectId, enriched: { $ne: true } };  // Only unenriched for regular enrichment
     
     const businesses = await businessCollection
       .find(query)
@@ -314,6 +316,7 @@ class SaaSScraper {
     
     for (const business of businesses) {
       try {        
+        console.log(business.name)
         const enrichedData = await aiService.enrichBusiness(business, enrichmentConfig.fields);
         
         // Update business with enriched data
