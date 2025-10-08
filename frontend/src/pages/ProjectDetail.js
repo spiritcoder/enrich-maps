@@ -139,7 +139,7 @@ const ProjectDetail = () => {
       </div>
 
       <h1 style={{ marginBottom: '2rem' }}>
-        {statusIcons[project.status]} {project.searchTerm || project.keyword}
+        {statusIcons[project.status]} {project.name}
       </h1>
 
       {/* Status Card */}
@@ -191,6 +191,7 @@ const ProjectDetail = () => {
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem' }}>
           <div>
             <h4 style={{ marginBottom: '0.5rem' }}>🔍 Search Details</h4>
+            <p><strong>Project Name:</strong> {project.name}</p>
             <p><strong>Search Term:</strong> {project.searchTerm || project.keyword}</p>
             <p><strong>Business Limit:</strong> {project.businessLimit?.toLocaleString()}</p>
             {project.businessesPerLocation && (

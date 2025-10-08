@@ -3,6 +3,7 @@ const { authenticateToken } = require('../middleware/auth');
 const Project = require('../models/Project');
 const { MongoClient } = require('mongodb');
 const ExcelJS = require('exceljs');
+const { sanitizeFilename } = require('../../utils/filename-sanitizer');
 
 const router = express.Router();
 
@@ -85,7 +86,8 @@ router.get('/:projectId', authenticateToken, async (req, res) => {
     await projectModel.close();
     
     // Set response headers for download
-    const filename = `${project.searchTerm || 'businesses'}_${projectId}_${Date.now()}.xlsx`;
+    const sanitizedName = sanitizeFilename(project.name || project.searchTerm || 'businesses');
+    const filename = `${sanitizedName}_${projectId.slice(-8)}.xlsx`;
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     

@@ -5,6 +5,7 @@ import { projects, countries, enrichment } from '../services/api';
 const CreateProject = () => {
   const navigate = useNavigate();
   const [formData, setFormData] = useState({
+    projectName: '',
     searchTerm: '',
     businessLimit: '100',
     businessesPerLocation: '',
@@ -268,6 +269,26 @@ const CreateProject = () => {
       )}
 
       <form onSubmit={handleSubmit}>
+        {/* Project Name Section */}
+        <div style={cardStyle}>
+          <h3 style={{ marginBottom: '1rem' }}>🏷️ Project Name</h3>
+          <div>
+            <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 'bold' }}>
+              Project Name (Optional)
+            </label>
+            <input
+              type="text"
+              placeholder="e.g., NYC Pizza Research, Q1 Market Analysis"
+              value={formData.projectName}
+              onChange={(e) => setFormData(prev => ({ ...prev, projectName: e.target.value }))}
+              style={inputStyle}
+            />
+            <p style={{ fontSize: '0.9rem', color: '#6b7280', marginTop: '0.5rem' }}>
+              Give your project a memorable name. If left empty, we'll generate one based on your search.
+            </p>
+          </div>
+        </div>
+
         {/* Niche & Business Limit Section */}
         <div style={cardStyle}>
           <h3 style={{ marginBottom: '1rem' }}>🔍 What to Scrape</h3>

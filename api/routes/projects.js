@@ -11,7 +11,7 @@ router.use(authenticateToken);
 // Create new project
 router.post('/', async (req, res) => {
   try {
-    const { searchTerm, locations, businessLimit, businessesPerLocation, enrichment } = req.body;
+    const { projectName, searchTerm, locations, businessLimit, businessesPerLocation, enrichment } = req.body;
 
     // Validation
     if (!searchTerm || !locations || !Array.isArray(locations) || locations.length === 0 || !businessLimit) {
@@ -56,10 +56,13 @@ router.post('/', async (req, res) => {
     const projectModel = new Project();
     await projectModel.init();
 
+    // Generate project name
+    const generatedName = projectName?.trim() || `${searchTerm} - ${locations.length} location${locations.length > 1 ? 's' : ''}`;
+    
     // Create project
     const projectData = {
       userId: user._id,
-      name: `${searchTerm} - ${locations.length} location${locations.length > 1 ? 's' : ''}`,
+      name: generatedName,
       searchTerm,
       locations,
       businessLimit,
