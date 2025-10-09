@@ -4,7 +4,7 @@ import { enrichment, projects } from '../services/api';
 const EnrichmentModal = ({ project, onClose, onSuccess }) => {
   const [formData, setFormData] = useState({
     aiProvider: 'deepseek',
-    fields: []
+    fields: ['business_description', 'specialties_services', 'price_range', 'target_audience', 'customer_reviews_summary', 'accessibility_features', 'best_times_to_visit', 'parking_availability', 'payment_methods']
   });
   const [aiProviders, setAiProviders] = useState({});
   const [enrichmentFields, setEnrichmentFields] = useState({});
@@ -131,7 +131,7 @@ const EnrichmentModal = ({ project, onClose, onSuccess }) => {
         <div style={{ marginBottom: '1.5rem', padding: '1rem', background: '#f8fafc', borderRadius: '6px' }}>
           <h4 style={{ margin: '0 0 0.5rem 0' }}>📊 Project: {project.name}</h4>
           <p style={{ margin: 0, color: '#6b7280' }}>
-            This will enrich all {project.results?.processed || 0} businesses in your project with AI-generated data.
+            This will enrich all {project.results?.processed || 0} businesses with directory-friendly AI content. <strong>All 9 directory fields are selected by default.</strong>
           </p>
         </div>
 

@@ -25,32 +25,47 @@ class AIEnrichmentService {
   buildEnrichmentPrompt(business, fields) {
     const fieldDescriptions = fields.map(fieldKey => {
       const field = ENRICHMENT_FIELDS[fieldKey];
-      return `- ${field.name}: ${field.description}`;
+      return `- ${fieldKey}: ${field.description}`;
     }).join('\n');
 
-    return `You are a business data enrichment AI. Based on the following business information, provide additional details for the requested fields.
+    // Include business attributes if available
+    let businessAttributesText = '';
+    if (business.business_attributes && typeof business.business_attributes === 'object') {
+      businessAttributesText = '\n- Business Attributes: ' + JSON.stringify(business.business_attributes);
+    }
+
+    // Include reviews if available as array
+    let reviewsText = '';
+    if (business.reviews && Array.isArray(business.reviews)) {
+      reviewsText = '\n- Customer Reviews: ' + business.reviews.slice(0, 3).join(' | ');
+    } else if (business.reviews_text) {
+      reviewsText = '\n- Customer Reviews: ' + business.reviews_text;
+    }
+
+    return `You are a business directory content specialist. Create professional, user-friendly content for business directory listings based on the provided information.
 
 Business Information:
 - Name: ${business.name || 'N/A'}
 - Address: ${business.address || 'N/A'}
 - Phone: ${business.phone || 'N/A'}
 - Website: ${business.website || 'N/A'}
-- Rating: ${business.rating || 'N/A'}
-- Reviews: ${business.reviews || 'N/A'}
-- Category: ${business.category || 'N/A'}
-- Description: ${business.description || 'N/A'}
+- Rating: ${business.rating || 'N/A'} (${business.review_count || 0} reviews)
+- Categories: ${business.categories || business.category || 'N/A'}
+- Hours: ${business.hours || 'N/A'}${businessAttributesText}${reviewsText}
 
-Please provide the following information in JSON format:
+Create directory-friendly content for these fields in JSON format:
 ${fieldDescriptions}
 
-Rules:
-1. Return only valid JSON
-2. Use "N/A" for unavailable information
-3. Keep descriptions concise (max 200 characters)
-4. Base answers on the provided business information
-5. Don't make up specific details like exact prices or menu items
+Directory Content Guidelines:
+1. Write for potential customers browsing a business directory
+2. Focus on practical, useful information for visitors
+3. Keep descriptions professional and concise (50-150 words)
+4. Use "Not specified" for unavailable information
+5. Base content on provided data - don't invent specific details
+6. For price_range, use: Budget, Mid-range, or Premium
+7. Make content helpful for someone deciding whether to visit
 
-JSON Response:`;
+Return only valid JSON with the field keys exactly as specified above:`;
   }
 
   async callAI(prompt) {
@@ -82,7 +97,7 @@ JSON Response:`;
         };
         break;
 
-      case 'claude-3-sonnet-20240229':
+      case 'claude-3-haiku-20240307':
         headers['x-api-key'] = this.apiKey;
         headers['anthropic-version'] = '2023-06-01';
         requestBody = {

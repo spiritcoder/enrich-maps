@@ -14,7 +14,7 @@ const CreateProject = () => {
     enrichment: {
       enabled: false,
       aiProvider: 'deepseek',
-      fields: []
+      fields: ['business_description', 'specialties_services', 'price_range', 'target_audience', 'customer_reviews_summary', 'accessibility_features', 'best_times_to_visit', 'parking_availability', 'payment_methods']
     }
   });
   const [selectedCountry, setSelectedCountry] = useState('');
@@ -545,10 +545,12 @@ const CreateProject = () => {
               { key: 'address', label: 'Address', description: 'Physical address' },
               { key: 'rating', label: 'Rating', description: 'Google Maps rating' },
               { key: 'review_count', label: 'Review Count', description: 'Number of reviews' },
-              { key: 'hours', label: 'Business Hours', description: 'Operating hours' },
+              { key: 'hours', label: 'Business Hours', description: 'Operating hours by day' },
               { key: 'categories', label: 'Categories', description: 'Business categories' },
               { key: 'coordinates', label: 'Coordinates', description: 'Latitude and longitude' },
-              { key: 'images', label: 'Images', description: 'Business photos' }
+              { key: 'images', label: 'Images', description: 'Business photos' },
+              { key: 'reviews', label: 'Customer Reviews', description: 'Individual customer reviews' },
+              { key: 'business_attributes', label: 'Business Attributes', description: 'Structured business features from About tab' }
             ].map(field => (
               <label 
                 key={field.key}
@@ -583,7 +585,7 @@ const CreateProject = () => {
           <h3 style={{ marginBottom: '1rem' }}>🤖 AI Data Enrichment (Optional)</h3>
           
           <p style={{ fontSize: '0.9rem', color: '#6b7280', marginBottom: '1rem' }}>
-            Enhance your data with AI-powered insights and additional business information:
+            Enhance your data with AI-powered directory content. <strong>All 9 directory fields are selected by default</strong> for comprehensive business listings:
           </p>
           <label style={{ display: 'flex', alignItems: 'center', marginBottom: '1rem', cursor: 'pointer' }}>
             <input

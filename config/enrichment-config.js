@@ -35,137 +35,70 @@ const AI_PROVIDERS = {
 };
 
 const ENRICHMENT_FIELDS = {
-  // Core Business Details
-  extendedDescription: {
-    name: 'Extended Description',
-    description: 'AI-generated detailed business description',
-    category: 'Core Details'
+  // Marketing & Content
+  business_description: {
+    name: 'Business Description',
+    description: 'Professional description for directory listings',
+    category: 'Marketing & Content'
   },
-  highlights: {
-    name: 'Business Highlights',
-    description: 'Key features and unique selling points',
-    category: 'Core Details'
+  specialties_services: {
+    name: 'Specialties & Services',
+    description: 'Key services and specialties offered',
+    category: 'Marketing & Content'
   },
-  services: {
-    name: 'Services/Products',
-    description: 'Detailed breakdown of offerings',
-    category: 'Core Details'
-  },
-  amenities: {
-    name: 'Amenities',
-    description: 'Facilities like parking, WiFi, accessibility',
-    category: 'Core Details'
-  },
-  paymentMethods: {
-    name: 'Payment Methods',
-    description: 'Accepted payment types',
-    category: 'Core Details'
-  },
-
-  // Menu & Pricing (Food businesses)
-  menuItems: {
-    name: 'Menu Items',
-    description: 'Popular dishes and signature items',
-    category: 'Menu & Pricing'
-  },
-  priceRange: {
+  price_range: {
     name: 'Price Range',
-    description: '$ to $$$$ classification',
-    category: 'Menu & Pricing'
-  },
-  cuisineType: {
-    name: 'Cuisine Type',
-    description: 'Specific cuisine categories',
-    category: 'Menu & Pricing'
-  },
-  dietaryOptions: {
-    name: 'Dietary Options',
-    description: 'Vegan, gluten-free, halal options',
-    category: 'Menu & Pricing'
+    description: 'Pricing level (Budget, Mid-range, Premium)',
+    category: 'Marketing & Content'
   },
 
-  // Operational Details
-  bookingInfo: {
-    name: 'Booking Information',
-    description: 'Reservation requirements and process',
-    category: 'Operations'
+  // Customer Intelligence
+  target_audience: {
+    name: 'Target Audience',
+    description: 'Primary customer demographics and groups',
+    category: 'Customer Intelligence'
   },
-  dressCode: {
-    name: 'Dress Code',
-    description: 'Attire requirements',
-    category: 'Operations'
+  customer_reviews_summary: {
+    name: 'Customer Reviews Summary',
+    description: 'Summary of common customer feedback themes',
+    category: 'Customer Intelligence'
   },
-  ageRestrictions: {
-    name: 'Age Restrictions',
-    description: 'Family-friendly, 18+, 21+ policies',
-    category: 'Operations'
-  },
-  groupLimits: {
-    name: 'Group Size Limits',
-    description: 'Maximum party size and private events',
-    category: 'Operations'
+  accessibility_features: {
+    name: 'Accessibility Features',
+    description: 'Wheelchair access, parking, and accessibility info',
+    category: 'Customer Intelligence'
   },
 
-  // Quality Indicators
-  awards: {
-    name: 'Awards & Certifications',
-    description: 'Industry recognition and certifications',
-    category: 'Quality'
+  // Operational Insights
+  best_times_to_visit: {
+    name: 'Best Times to Visit',
+    description: 'Recommended visiting times and busy periods',
+    category: 'Operational Insights'
   },
-  yearsInBusiness: {
-    name: 'Years in Business',
-    description: 'Establishment date and longevity',
-    category: 'Quality'
+  parking_availability: {
+    name: 'Parking Availability',
+    description: 'Parking options and availability information',
+    category: 'Operational Insights'
   },
-  ownershipType: {
-    name: 'Ownership Type',
-    description: 'Family-owned, chain, franchise',
-    category: 'Quality'
-  },
-
-  // Customer Experience
-  atmosphere: {
-    name: 'Atmosphere',
-    description: 'Vibe and ambiance description',
-    category: 'Experience'
-  },
-  noiseLevel: {
-    name: 'Noise Level',
-    description: 'Quiet, moderate, or lively environment',
-    category: 'Experience'
-  },
-  waitTimes: {
-    name: 'Wait Times',
-    description: 'Typical wait and busy periods',
-    category: 'Experience'
-  },
-  customerDemographics: {
-    name: 'Customer Demographics',
-    description: 'Target audience and typical customers',
-    category: 'Experience'
+  payment_methods: {
+    name: 'Payment Methods',
+    description: 'Accepted payment types and methods',
+    category: 'Operational Insights'
   }
 };
 
 const FIELD_CATEGORIES = {
-  'Core Details': {
-    name: 'Core Business Details',
-    description: 'Essential business information and features'
+  'Marketing & Content': {
+    name: 'Marketing & Content',
+    description: 'Professional descriptions and key business information'
   },
-  'Menu & Pricing': {
-    name: 'Menu & Pricing',
-    description: 'Food, pricing, and dining options'
+  'Customer Intelligence': {
+    name: 'Customer Intelligence',
+    description: 'Customer insights and accessibility information'
   },
-  'Operations': {
-    name: 'Operational Details',
-    description: 'Booking, policies, and operational info'
-  },
-  'Quality': {
-    name: 'Quality Indicators',
-    description: 'Awards, experience, and credibility'
-  },
-  'Experience': {
-    name: 'Customer Experience',
-    description: 'Atmosphere, demographics, and experience'
+  'Operational Insights': {
+    name: 'Operational Insights',
+    description: 'Practical information for visitors'
   }
 };
 
