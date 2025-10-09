@@ -99,10 +99,8 @@ class GenericGoogleMapsParser {
       const pageTitle = await page.title();
       
       if (this.isConsentPage(pageContent, pageTitle)) {
-        console.log(`🔒 Consent page detected, handling...`);
         const handled = await this.handleConsentPage(page);
         if (!handled) {
-          console.log(`❌ Failed to handle consent page`);
           return 0;
         }
         await page.waitForTimeout(3000);
@@ -130,11 +128,9 @@ class GenericGoogleMapsParser {
       
       for (let i = 0; i < targetCount; i++) {
         try {
-          console.log(`Extracting business ${i + 1}/${targetCount}`);
           const details = await this.extractBusinessDetails(links[i]);
           
           if (details && details.name) {
-            console.log(`Extracted: ${details.name}`);
             
             if (this.isValidBusiness(details.name, details.categories)) {
               details.country = country;
@@ -230,12 +226,31 @@ class GenericGoogleMapsParser {
       }
     }
 
-    for (let i = 0; i < 3; i++) {
+    let previousHeight = 0;
+    let stableCount = 0;
+    const maxScrolls = 15; // Increased from 3 to 15
+    
+    for (let i = 0; i < maxScrolls; i++) {
       try {
         if (feedElement) {
+          // Get current scroll height
+          const currentHeight = await page.evaluate(el => el.scrollHeight, feedElement);
+          
+          // Scroll to bottom
           await page.evaluate(el => {
             el.scrollTop = el.scrollHeight;
           }, feedElement);
+          
+          // Check if new content loaded
+          if (currentHeight === previousHeight) {
+            stableCount++;
+            if (stableCount >= 3) {
+              break;
+            }
+          } else {
+            stableCount = 0;
+            previousHeight = currentHeight;
+          }
         } else {
           await page.evaluate(() => {
             window.scrollBy(0, 1000);
@@ -390,12 +405,8 @@ class GenericGoogleMapsParser {
         
         if (reviewCount) {
           details.review_count = parseInt(reviewCount);
-          console.log(`✓ Review count found: ${details.review_count}`);
-        } else {
-          console.log('✗ No review count found');
         }
       } catch (err) {
-        console.log('Review count extraction failed:', err.message);
       }
       
       // Extract phone using Chrome extension selectors
@@ -554,7 +565,6 @@ class GenericGoogleMapsParser {
           details.reviews_text = reviews.join(' | '); // Also keep joined version for compatibility
         }
       } catch (err) {
-        console.log('Reviews extraction failed:', err.message);
       }
       
       // Extract coordinates from URL (multiple patterns)
@@ -620,7 +630,6 @@ class GenericGoogleMapsParser {
           try {
             aboutTab = await detailPage.$(selector);
             if (aboutTab) {
-              console.log(`Found About tab with selector: ${selector}`);
               break;
             }
           } catch (err) {
@@ -632,7 +641,6 @@ class GenericGoogleMapsParser {
           // Click About tab
           await aboutTab.click();
           await detailPage.waitForTimeout(3000);
-          console.log('Clicked About tab, extracting content...');
           
           // Extract structured business attributes from About tab
           const businessAttributes = await detailPage.evaluate(() => {
@@ -667,16 +675,9 @@ class GenericGoogleMapsParser {
           
           if (businessAttributes) {
             details.business_attributes = businessAttributes;
-            const attributeCount = Object.values(businessAttributes).flat().length;
-            console.log(`✓ Business attributes extracted: ${attributeCount} items across ${Object.keys(businessAttributes).length} categories`);
-          } else {
-            console.log('✗ No business attributes found');
           }
-        } else {
-          console.log('No About tab found');
-        }
+        } 
       } catch (err) {
-        console.log('About tab navigation failed:', err.message);
       }
       
       // Fallback: extract review count from about text if not found
@@ -694,7 +695,6 @@ class GenericGoogleMapsParser {
       return details;
       
     } catch (error) {
-      console.error(`Error extracting details from ${link}:`, error.message);
       return null;
     } finally {
       await detailPage.close();
