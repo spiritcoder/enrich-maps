@@ -17,12 +17,12 @@ const AI_PROVIDERS = {
     model: 'gpt-4'
   },
   claude: {
-    name: 'Claude AI',
-    description: 'Premium quality for complex analysis',
-    costPerBusiness: 2.0,
+    name: 'Claude 3 Haiku',
+    description: 'Fast and cost-effective AI enrichment',
+    costPerBusiness: 0.8,
     icon: '🔵',
     apiEndpoint: 'https://api.anthropic.com/v1/messages',
-    model: 'claude-3-sonnet-20240229'
+    model: 'claude-3-haiku-20240307'
   },
   gpt5: {
     name: 'GPT-5',
