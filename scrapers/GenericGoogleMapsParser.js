@@ -345,26 +345,57 @@ class GenericGoogleMapsParser {
         }
       }
       
-      // Extract review count
-      const reviewSelectors = config.selectors.reviews.split(', ');
-      for (const selector of reviewSelectors) {
-        try {
-          const reviewEl = await detailPage.$(selector);
-          if (reviewEl) {
-            const reviewText = await detailPage.evaluate(el => {
-              const text = el.innerText || el.textContent || el.getAttribute('aria-label') || '';
-              const match = text.match(/([\d,]+)\s*reviews?/i);
-              return match ? match[1] : null;
-            }, reviewEl);
-            
-            if (reviewText) {
-              details.review_count = parseInt(reviewText.replace(/,/g, ''));
-              break;
+      // Extract review count with comprehensive approach
+      try {
+        const reviewCount = await detailPage.evaluate(() => {
+          // Try multiple approaches to find review count
+          const patterns = [
+            /([\d,]+)\s*reviews?/i,
+            /\(([\d,]+)\)/,
+            /([\d,]+)\s*review/i
+          ];
+          
+          // Search in various elements
+          const selectors = [
+            '.F7nice', '.UY7F9', '.fontTitleSmall', '.fontBodyMedium',
+            '[aria-label*="review"]', '[aria-label*="Review"]',
+            '.ceNzKf', '.MW4etd'
+          ];
+          
+          for (const selector of selectors) {
+            const elements = document.querySelectorAll(selector);
+            for (const el of elements) {
+              const texts = [
+                el.textContent,
+                el.getAttribute('aria-label'),
+                el.parentElement?.textContent,
+                el.nextElementSibling?.textContent
+              ];
+              
+              for (const text of texts) {
+                if (text) {
+                  for (const pattern of patterns) {
+                    const match = text.match(pattern);
+                    if (match && match[1]) {
+                      return match[1].replace(/,/g, '');
+                    }
+                  }
+                }
+              }
             }
           }
-        } catch (err) {
-          continue;
+          
+          return null;
+        });
+        
+        if (reviewCount) {
+          details.review_count = parseInt(reviewCount);
+          console.log(`✓ Review count found: ${details.review_count}`);
+        } else {
+          console.log('✗ No review count found');
         }
+      } catch (err) {
+        console.log('Review count extraction failed:', err.message);
       }
       
       // Extract phone using Chrome extension selectors
@@ -579,21 +610,73 @@ class GenericGoogleMapsParser {
       }
       details.images = images;
       
-      // Extract about/description using better selectors
-      const aboutSelectors = ['.PYvSYb', '.lMbq3e', '.WeS02d .fontBodyMedium', '[data-attrid="kc:/collection/knowledge_panels/local_business:business_description"]', '.rogA2c .fontBodyMedium'];
-      for (const selector of aboutSelectors) {
-        try {
-          const aboutEl = await detailPage.$(selector);
-          if (aboutEl) {
-            const aboutText = (await detailPage.evaluate(el => el.textContent?.trim(), aboutEl));
-            if (aboutText && aboutText.length > 10 && !aboutText.includes('Suggest an edit')) {
-              details.about = aboutText;
+      // Extract about/description by navigating to About tab
+      try {
+        // Look for About tab button
+        const aboutTabSelectors = ['button[data-value="About"]', 'button[aria-label*="About"]', '.RWPxGd button[data-value="About"]', '[role="tab"][data-tab-index="1"]', 'button:contains("About")', '[data-tab-index="1"]'];
+        let aboutTab = null;
+        
+        for (const selector of aboutTabSelectors) {
+          try {
+            aboutTab = await detailPage.$(selector);
+            if (aboutTab) {
+              console.log(`Found About tab with selector: ${selector}`);
               break;
             }
+          } catch (err) {
+            continue;
           }
-        } catch (err) {
-          continue;
         }
+        
+        if (aboutTab) {
+          // Click About tab
+          await aboutTab.click();
+          await detailPage.waitForTimeout(3000);
+          console.log('Clicked About tab, extracting content...');
+          
+          // Extract structured business attributes from About tab
+          const businessAttributes = await detailPage.evaluate(() => {
+            const attributes = {};
+            const sections = document.querySelectorAll('.iP2t7d.fontBodyMedium');
+            
+            sections.forEach(section => {
+              const header = section.querySelector('h2.iL3Qke.fontTitleSmall');
+              if (header) {
+                const categoryName = header.textContent.trim().toLowerCase().replace(/\s+/g, '_');
+                const items = [];
+                
+                const listItems = section.querySelectorAll('li.hpLkke');
+                listItems.forEach(item => {
+                  const span = item.querySelector('span[aria-label]');
+                  if (span) {
+                    const text = span.textContent.trim();
+                    if (text && text.length > 0) {
+                      items.push(text);
+                    }
+                  }
+                });
+                
+                if (items.length > 0) {
+                  attributes[categoryName] = items;
+                }
+              }
+            });
+            
+            return Object.keys(attributes).length > 0 ? attributes : null;
+          });
+          
+          if (businessAttributes) {
+            details.business_attributes = businessAttributes;
+            const attributeCount = Object.values(businessAttributes).flat().length;
+            console.log(`✓ Business attributes extracted: ${attributeCount} items across ${Object.keys(businessAttributes).length} categories`);
+          } else {
+            console.log('✗ No business attributes found');
+          }
+        } else {
+          console.log('No About tab found');
+        }
+      } catch (err) {
+        console.log('About tab navigation failed:', err.message);
       }
       
       // Fallback: extract review count from about text if not found
