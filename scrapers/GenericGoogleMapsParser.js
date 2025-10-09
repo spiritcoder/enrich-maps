@@ -484,19 +484,46 @@ class GenericGoogleMapsParser {
         }
       }
       
-      // Extract reviews using Chrome extension approach
-      const reviewElements = await detailPage.$$('.jftiEf .wiI7pd');
-      const reviews = [];
-      for (let i = 0; i < Math.min(5, reviewElements.length); i++) {
-        try {
-          const reviewText = await detailPage.evaluate(el => el.textContent?.trim(), reviewElements[i]);
-          if (reviewText) reviews.push(reviewText);
-        } catch (err) {
-          continue;
+      // Extract reviews as array using Chrome extension approach
+      try {
+        // Try to scroll to reviews section first
+        await detailPage.evaluate(() => {
+          const reviewsSection = document.querySelector('.jftiEf') || document.querySelector('[data-review-id]');
+          if (reviewsSection) {
+            reviewsSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        });
+        await detailPage.waitForTimeout(2000);
+        
+        // Try multiple review selectors
+        const reviewSelectors = ['.jftiEf .wiI7pd', '.MyEned .wiI7pd', '.gws-localreviews__google-review', '.ODSEW-ShBeI-text'];
+        let reviewElements = [];
+        
+        for (const selector of reviewSelectors) {
+          reviewElements = await detailPage.$$(selector);
+          if (reviewElements.length > 0) break;
         }
-      }
-      if (reviews.length > 0) {
-        details.reviews = reviews.join(' | ');
+        
+        const reviews = [];
+        const maxReviews = Math.min(10, reviewElements.length); // Increased to 10
+        
+        for (let i = 0; i < maxReviews; i++) {
+          try {
+            const reviewText = await detailPage.evaluate(el => el.textContent?.trim(), reviewElements[i]);
+            if (reviewText && reviewText.length > 10) {
+              reviews.push(reviewText);
+            }
+          } catch (err) {
+            continue;
+          }
+        }
+        
+        if (reviews.length > 0) {
+          details.reviews = reviews; // Store as array
+          details.reviews_text = reviews.join(' | '); // Also keep joined version for compatibility
+        }
+      } catch (err) {
+        console.log('Reviews extraction failed:', err.message);
       }
       
       // Extract coordinates from URL (multiple patterns)
@@ -552,14 +579,14 @@ class GenericGoogleMapsParser {
       }
       details.images = images;
       
-      // Extract about/description
-      const aboutSelectors = config.selectors.about.split(', ');
+      // Extract about/description using better selectors
+      const aboutSelectors = ['.PYvSYb', '.lMbq3e', '.WeS02d .fontBodyMedium', '[data-attrid="kc:/collection/knowledge_panels/local_business:business_description"]', '.rogA2c .fontBodyMedium'];
       for (const selector of aboutSelectors) {
         try {
           const aboutEl = await detailPage.$(selector);
           if (aboutEl) {
-            const aboutText = (await detailPage.evaluate(el => el.innerText, aboutEl)).trim();
-            if (aboutText && aboutText.length > 10) {
+            const aboutText = (await detailPage.evaluate(el => el.textContent?.trim(), aboutEl));
+            if (aboutText && aboutText.length > 10 && !aboutText.includes('Suggest an edit')) {
               details.about = aboutText;
               break;
             }
