@@ -418,23 +418,69 @@ class GenericGoogleMapsParser {
         }
       }
       
-      // Extract hours using Chrome extension selectors
-      const hoursSelectors = ['[data-item-id="oh"] .Io6YTe', '.t39EBf .G8aQO', 'div[data-item-id="oh"]', '.t39EBf', '.OqCZI'];
-      for (const selector of hoursSelectors) {
-        try {
-          const hoursEl = await detailPage.$(selector);
-          if (hoursEl) {
-            let hoursText = await detailPage.evaluate(el => {
-              return el.textContent || el.innerText;
-            }, hoursEl);
+      // Extract detailed hours by day
+      try {
+        const hoursTable = await detailPage.$('.t39EBf.GUrTXd table.eK4R0e');
+        if (hoursTable) {
+          const hoursData = await detailPage.evaluate(table => {
+            const rows = table.querySelectorAll('tr.y0skZc');
+            const hours = {};
+            const closedDays = [];
             
-            if (hoursText && hoursText.trim().length > 3) {
-              details.hours = hoursText.trim();
-              break;
-            }
+            rows.forEach(row => {
+              const dayEl = row.querySelector('td.ylH6lf div');
+              const hoursEl = row.querySelector('td.mxowUb .G8aQO') || row.querySelector('td.mxowUb');
+              
+              if (dayEl && hoursEl) {
+                const day = dayEl.textContent.trim();
+                let dayHours = hoursEl.textContent?.trim() || hoursEl.getAttribute('aria-label')?.trim();
+                
+                if (dayHours) {
+                  // Clean hours text
+                  dayHours = dayHours.replace(/\s+to\s+/g, '–').replace(/\s+/g, ' ');
+                  hours[day] = dayHours;
+                  
+                  if (dayHours.toLowerCase().includes('closed')) {
+                    closedDays.push(day);
+                  }
+                }
+              }
+            });
+            
+            return { hours, closedDays };
+          }, hoursTable);
+          
+          if (Object.keys(hoursData.hours).length > 0) {
+            details.hours_detailed = hoursData.hours;
+            details.closed_days = hoursData.closedDays;
+            details.is_open_sunday = hoursData.hours.Sunday && !hoursData.hours.Sunday.toLowerCase().includes('closed');
+            
+            // Create summary hours string
+            const hoursSummary = Object.entries(hoursData.hours)
+              .map(([day, hours]) => `${day}: ${hours}`)
+              .join(', ');
+            details.hours = hoursSummary;
           }
-        } catch (err) {
-          continue;
+        }
+      } catch (err) {
+        // Fallback to simple hours extraction
+        const hoursSelectors = ['[data-item-id="oh"] .Io6YTe', '.t39EBf .G8aQO', 'div[data-item-id="oh"]', '.t39EBf', '.OqCZI'];
+        for (const selector of hoursSelectors) {
+          try {
+            const hoursEl = await detailPage.$(selector);
+            if (hoursEl) {
+              let hoursText = await detailPage.evaluate(el => {
+                return el.textContent || el.innerText;
+              }, hoursEl);
+              
+              if (hoursText && hoursText.trim().length > 3) {
+                details.hours = hoursText.trim();
+                break;
+              }
+            }
+          } catch (err) {
+            continue;
+          }
         }
       }
       
