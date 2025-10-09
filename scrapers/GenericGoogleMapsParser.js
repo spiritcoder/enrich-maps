@@ -404,27 +404,83 @@ class GenericGoogleMapsParser {
         }
       }
       
-      // Extract address
+      // Extract address with better text extraction
       const addressSelectors = config.selectors.address.split(', ');
       for (const selector of addressSelectors) {
         try {
           const addrEl = await detailPage.$(selector);
           if (addrEl) {
-            details.address = (await detailPage.evaluate(el => el.innerText, addrEl)).trim();
-            break;
+            // Try multiple text extraction methods
+            let addressText = await detailPage.evaluate(el => {
+              // Try aria-label first (often contains clean text)
+              if (el.getAttribute('aria-label')) {
+                return el.getAttribute('aria-label');
+              }
+              // Try data-value or title attributes
+              if (el.getAttribute('data-value')) {
+                return el.getAttribute('data-value');
+              }
+              if (el.getAttribute('title')) {
+                return el.getAttribute('title');
+              }
+              // Use textContent instead of innerText to avoid styled elements
+              return el.textContent || el.innerText;
+            }, addrEl);
+            
+            if (addressText) {
+              // Clean the address text
+              addressText = addressText.trim()
+                .replace(/^[^a-zA-Z0-9]*/, '') // Remove leading symbols
+                .replace(/Address:?\s*/i, '') // Remove "Address:" prefix
+                .replace(/^\s*[\u2600-\u26FF\u2700-\u27BF]\s*/, ''); // Remove leading Unicode symbols
+              
+              if (addressText && addressText.length > 5) {
+                details.address = addressText;
+                break;
+              }
+            }
           }
         } catch (err) {
           continue;
         }
       }
       
-      // Extract hours
-      try {
-        const hoursEl = await detailPage.$('div[data-item-id="oh"], .t39EBf, .OqCZI');
-        if (hoursEl) {
-          details.hours = (await detailPage.evaluate(el => el.innerText, hoursEl)).trim();
+      // Extract hours with better text extraction
+      const hoursSelectors = ['div[data-item-id="oh"]', '.t39EBf', '.OqCZI', '[data-value*="hours"]', '[aria-label*="hours"]', '.fontBodyMedium'];
+      for (const selector of hoursSelectors) {
+        try {
+          const hoursEl = await detailPage.$(selector);
+          if (hoursEl) {
+            let hoursText = await detailPage.evaluate(el => {
+              // Try aria-label first (often contains clean text)
+              if (el.getAttribute('aria-label') && el.getAttribute('aria-label').toLowerCase().includes('hours')) {
+                return el.getAttribute('aria-label');
+              }
+              // Try data-value
+              if (el.getAttribute('data-value')) {
+                return el.getAttribute('data-value');
+              }
+              // Use textContent to avoid styled elements
+              return el.textContent || el.innerText;
+            }, hoursEl);
+            
+            if (hoursText) {
+              // Clean the hours text
+              hoursText = hoursText.trim()
+                .replace(/^[^a-zA-Z0-9]*/, '') // Remove leading symbols
+                .replace(/Hours:?\s*/i, '') // Remove "Hours:" prefix
+                .replace(/^\s*[\u2600-\u26FF\u2700-\u27BF]\s*/, ''); // Remove leading Unicode symbols
+              
+              if (hoursText && hoursText.length > 3 && !hoursText.match(/^[\u2600-\u26FF\u2700-\u27BF]+$/)) {
+                details.hours = hoursText;
+                break;
+              }
+            }
+          }
+        } catch (err) {
+          continue;
         }
-      } catch (err) {}
+      }
       
       // Extract coordinates from URL (multiple patterns)
       let coordMatch = link.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
