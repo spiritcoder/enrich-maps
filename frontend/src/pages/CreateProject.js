@@ -83,8 +83,8 @@ const CreateProject = () => {
 
     // Validate business limit
     const businessLimit = parseInt(formData.businessLimit);
-    if (!businessLimit || businessLimit < 1 || businessLimit > 10000) {
-      setError('Business limit must be a number between 1 and 10,000');
+    if (!businessLimit || businessLimit < 1 || businessLimit > 30000) {
+      setError('Business limit must be a number between 1 and 30,000');
       setLoading(false);
       return;
     }

@@ -44,8 +44,8 @@ class SaaSScraper {
       locationLimit = Math.min(locationLimit, remainingLimit);
       
       const query = location.subdivision 
-        ? `${searchTerm} ${location.subdivision}, ${location.country}`
-        : `${searchTerm} ${location.country}`;
+        ? `${searchTerm} in ${location.subdivision}, ${location.country}`
+        : `${searchTerm} in ${location.country}`;
       
       console.log(`📍 Scraping: ${query} (limit: ${locationLimit})`);
       
@@ -153,7 +153,7 @@ class SaaSScraper {
       // Process each subdivision
       for (const subdivision of country.subdivisions) {
         try {
-          const query = `${searchTerm} ${subdivision}, ${country.name}`;
+          const query = `${searchTerm} in ${subdivision}, ${country.name}`;
           console.log(`📍 Scraping: ${query}`);
           
           const limit = businessesPerLocation || 100;

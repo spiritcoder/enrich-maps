@@ -18,8 +18,8 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'Search term, locations, and business limit are required' });
     }
 
-    if (businessLimit < 1 || businessLimit > 10000) {
-      return res.status(400).json({ error: 'Business limit must be between 1 and 10,000' });
+    if (businessLimit < 1 || businessLimit > 30000) {
+      return res.status(400).json({ error: 'Business limit must be between 1 and 30,000' });
     }
 
     // Calculate exact costs
