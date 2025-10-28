@@ -233,6 +233,120 @@ router.post('/:id/enrich', async (req, res) => {
   }
 });
 
+// Upload Excel for business lookup
+router.post('/excel-lookup', async (req, res) => {
+  try {
+    const multer = require('multer');
+    const upload = multer({ dest: 'uploads/' });
+    
+    // Handle file upload
+    upload.single('excelFile')(req, res, async (err) => {
+      if (err) {
+        return res.status(400).json({ error: 'File upload failed' });
+      }
+
+      if (!req.file) {
+        return res.status(400).json({ error: 'No Excel file provided' });
+      }
+
+      const { projectName, enrichment } = req.body;
+      const filePath = req.file.path;
+
+      try {
+        // Validate Excel file
+        const ExcelLookupService = require('../../services/ExcelLookupService');
+        const service = new ExcelLookupService();
+        const validation = service.validateExcelFile(filePath);
+
+        if (!validation.valid) {
+          return res.status(400).json({ error: validation.error });
+        }
+
+        // Calculate costs
+        const businessCount = validation.rowCount;
+        const baseCost = businessCount;
+        let enrichmentCost = 0;
+        
+        if (enrichment?.enabled && enrichment.aiProvider) {
+          const { AI_PROVIDERS } = require('../../config/enrichment-config');
+          const provider = AI_PROVIDERS[enrichment.aiProvider];
+          if (!provider) {
+            return res.status(400).json({ error: 'Invalid AI provider' });
+          }
+          enrichmentCost = businessCount * provider.costPerBusiness;
+        }
+        
+        const totalCost = baseCost + enrichmentCost;
+        const user = req.user;
+        const availableCredits = (user.subscription?.monthlyLimit || 50) + (user.credits?.balance || 0) - user.usage.currentMonth;
+
+        if (totalCost > availableCredits) {
+          return res.status(400).json({ 
+            error: 'Insufficient credits',
+            required: totalCost,
+            available: availableCredits,
+            businessCount,
+            breakdown: { baseCost, enrichmentCost, totalCost }
+          });
+        }
+
+        // Create project
+        const projectModel = new Project();
+        await projectModel.init();
+
+        const generatedName = projectName?.trim() || `Excel Lookup - ${businessCount} businesses`;
+        
+        const projectData = {
+          userId: user._id,
+          name: generatedName,
+          searchTerm: 'Excel Business Lookup',
+          locations: ['Excel Upload'],
+          businessLimit: businessCount,
+          enrichment: enrichment || { enabled: false },
+          costs: { baseCost, enrichmentCost, totalCost },
+          excelFile: {
+            originalName: req.file.originalname,
+            path: filePath,
+            rowCount: businessCount,
+            columns: validation.columns
+          }
+        };
+
+        const project = await projectModel.create(projectData);
+        await projectModel.close();
+
+        // Add to job queue
+        const { createScrapingJob } = require('../../services/JobQueue');
+        await createScrapingJob(project._id.toString(), {
+          jobType: 'excel-lookup',
+          projectId: project._id.toString(),
+          excelFile: filePath,
+          businessCount,
+          enrichment
+        });
+
+        res.status(201).json({
+          message: 'Excel lookup project created successfully',
+          project,
+          validation: {
+            rowCount: businessCount,
+            columns: validation.columns,
+            sampleData: validation.sampleData
+          }
+        });
+
+      } catch (error) {
+        console.error('Excel processing error:', error);
+        res.status(500).json({ error: 'Failed to process Excel file' });
+      }
+    });
+
+  } catch (error) {
+    console.error('Excel upload error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Delete project
 router.delete('/:id', async (req, res) => {
   try {

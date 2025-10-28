@@ -2,12 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { projects, user } from '../services/api';
 import EnrichmentModal from '../components/EnrichmentModal';
+import ExcelUpload from '../components/ExcelUpload';
 
 const Dashboard = () => {
   const [projectList, setProjectList] = useState([]);
   const [usage, setUsage] = useState(null);
   const [loading, setLoading] = useState(true);
   const [enrichmentModal, setEnrichmentModal] = useState({ show: false, project: null });
+  const [showExcelUpload, setShowExcelUpload] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -49,6 +51,11 @@ const Dashboard = () => {
 
   const closeEnrichmentModal = () => {
     setEnrichmentModal({ show: false, project: null });
+  };
+
+  const handleExcelProjectCreated = (project) => {
+    setProjectList(prev => [project, ...prev]);
+    loadData(); // Refresh to get updated usage
   };
 
 
@@ -207,9 +214,17 @@ const Dashboard = () => {
       <div style={cardStyle}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
           <h3>🚀 Your Projects</h3>
-          <Link to="/create-project" style={buttonStyle}>
-            + New Project
-          </Link>
+          <div style={{ display: 'flex', gap: '1rem' }}>
+            <button 
+              onClick={() => setShowExcelUpload(true)}
+              style={{ ...buttonStyle, background: '#10b981' }}
+            >
+              📊 Excel Lookup
+            </button>
+            <Link to="/create-project" style={buttonStyle}>
+              + New Project
+            </Link>
+          </div>
         </div>
 
         {projectList.length === 0 ? (
@@ -266,6 +281,14 @@ const Dashboard = () => {
             closeEnrichmentModal();
             loadData(); // Refresh data
           }}
+        />
+      )}
+
+      {/* Excel Upload Modal */}
+      {showExcelUpload && (
+        <ExcelUpload 
+          onProjectCreated={handleExcelProjectCreated}
+          onClose={() => setShowExcelUpload(false)}
         />
       )}
     </div>

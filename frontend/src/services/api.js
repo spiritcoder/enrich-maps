@@ -75,4 +75,19 @@ export const enrichment = {
   calculateCost: (data) => api.post('/api/enrichment/calculate-cost', data),
 };
 
+// Excel Lookup API
+export const createExcelLookupProject = async (formData) => {
+  try {
+    const response = await api.post('/api/projects/excel-lookup', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    return { success: true, project: response.data.project, validation: response.data.validation };
+  } catch (error) {
+    const message = error.response?.data?.error || error.message || 'Upload failed';
+    throw new Error(message);
+  }
+};
+
 export default api;

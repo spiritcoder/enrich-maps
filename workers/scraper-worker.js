@@ -106,6 +106,147 @@ scrapingQueue.process('enrich-project', async (job) => {
   }
 });
 
+// Process Excel lookup jobs
+scrapingQueue.process('excel-lookup', async (job) => {
+  try {
+    const { projectId, excelFile, businessCount, enrichment } = job.data;
+    
+    const projectModel = new Project();
+    await projectModel.init();
+    await projectModel.updateStatus(projectId, 'processing');
+    
+    const project = await projectModel.findById(projectId);
+    if (!project) {
+      throw new Error(`Project not found: ${projectId}`);
+    }
+    
+    const userModel = new User();
+    await userModel.init();
+    const user = await userModel.findById(project.userId);
+    if (!user) {
+      throw new Error(`User not found: ${project.userId}`);
+    }
+    
+    // Validate credits
+    const availableCredits = (user.subscription?.monthlyLimit || 50) + (user.credits?.balance || 0) - user.usage.currentMonth;
+    if (project.costs.totalCost > availableCredits) {
+      throw new Error(`Insufficient credits: need ${project.costs.totalCost}, have ${availableCredits}`);
+    }
+    
+    console.log(`📊 Processing Excel file: ${businessCount} businesses`);
+    
+    // Create database connection
+    const { MongoClient } = require('mongodb');
+    const client = new MongoClient(process.env.MONGODB_URI || 'mongodb://localhost:27017');
+    await client.connect();
+    
+    const dbName = `saas_${projectId}`;
+    const db = client.db(dbName);
+    const businessCollection = db.collection('businesses');
+    
+    // Process Excel file with progressive saving
+    const ExcelLookupService = require('../services/ExcelLookupService');
+    const service = new ExcelLookupService();
+    
+    let processedCount = 0;
+    let foundCount = 0;
+    
+    const results = await service.processExcelFile(excelFile, async (current, total, found) => {
+      processedCount = current;
+      foundCount = found;
+      
+      const progressPercent = Math.min(Math.round((current / total) * 100), 99);
+      await job.progress(progressPercent);
+      
+      // Update project progress in real-time
+      await projectModel.updateResults(projectId, {
+        found: foundCount,
+        processed: processedCount
+      });
+      
+      // Update checkpoint for recovery
+      await projectModel.updateCheckpoint(projectId, {
+        last_processed_row: current - 1,
+        processed_count: processedCount,
+        found_count: foundCount,
+        last_updated: new Date()
+      });
+    }, projectId, db);
+    
+    // Results are already saved progressively, no batch save needed
+    console.log(`📊 Progressive saving completed: ${foundCount} businesses saved`);
+    
+    // Deduct base credits for found businesses only
+    await userModel.updateUsage(user._id, foundCount);
+    console.log(`💳 Deducted ${foundCount} credits for Excel lookup`);
+    
+    // Handle enrichment if enabled
+    let enrichedCount = 0;
+    if (enrichment?.enabled && enrichment.fields?.length > 0 && foundCount > 0) {
+      const { AI_PROVIDERS } = require('../config/enrichment-config');
+      const enrichmentRate = AI_PROVIDERS[enrichment.aiProvider]?.costPerBusiness || 0;
+      const enrichmentCost = foundCount * enrichmentRate;
+      
+      const currentUser = await userModel.findById(user._id);
+      const remainingCredits = (currentUser.subscription?.monthlyLimit || 50) + (currentUser.credits?.balance || 0) - currentUser.usage.currentMonth;
+      
+      if (enrichmentCost <= remainingCredits) {
+        const SaaSScraper = require('../scripts/saas-scraper');
+        const scraper = new SaaSScraper(projectId);
+        enrichedCount = await scraper.enrichBusinessData(db, enrichment, foundCount);
+        
+        const actualEnrichmentCost = enrichedCount * enrichmentRate;
+        await userModel.updateUsage(user._id, actualEnrichmentCost);
+      }
+    }
+    
+    await client.close();
+    
+    // Complete project
+    await projectModel.updateStatus(projectId, 'completed', { completedAt: new Date() });
+    await projectModel.updateResults(projectId, { found: foundCount, processed: foundCount });
+    await projectModel.updateProgress(projectId, foundCount, businessCount, enrichedCount);
+    
+    await projectModel.close();
+    await userModel.close();
+    
+    // PHASE 2: Clear checkpoint on successful completion
+    await projectModel.clearCheckpoint(projectId);
+    
+    console.log(`✅ Excel lookup job ${job.id} completed: ${foundCount} businesses found`);
+    return { success: true, totalFound: foundCount, totalProcessed: foundCount };
+    
+  } catch (error) {
+    console.error(`❌ Excel lookup job ${job.id} failed:`, error.message);
+    
+    try {
+      const projectModel = new Project();
+      await projectModel.init();
+      
+      // PHASE 3: Enhanced error logging with recovery info
+      const checkpoint = await projectModel.getCheckpoint(job.data.projectId);
+      
+      await projectModel.updateStatus(job.data.projectId, 'failed', {
+        error: error.message,
+        failedAt: new Date(),
+        canRecover: !!checkpoint,
+        lastProcessedRow: checkpoint?.last_processed_row || 0,
+        recoveryInfo: {
+          processedCount: checkpoint?.processed_count || 0,
+          foundCount: checkpoint?.found_count || 0,
+          lastUpdated: checkpoint?.last_updated
+        }
+      });
+      
+      await projectModel.close();
+    } catch (updateError) {
+      console.error('Failed to update project status:', updateError.message);
+    }
+    
+    throw error;
+  }
+});
+
 // Process scraping jobs
 scrapingQueue.process('scrape-project', async (job) => {
   try {    

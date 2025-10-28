@@ -23,6 +23,7 @@
     "express-rate-limit": "^7.1.5",
     "jsonwebtoken": "^9.0.2",
     "mongodb": "^6.3.0",
+    "multer": "^2.0.2",
     "nodemailer": "^6.9.7",
     "proxy-agent": "^6.3.1",
     "proxy-chain": "^2.4.0",

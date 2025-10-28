@@ -105,6 +105,42 @@ class Project {
     );
   }
 
+  // PHASE 2: Checkpoint management for recovery
+  async updateCheckpoint(id, checkpoint) {
+    return await this.collection.updateOne(
+      { _id: new ObjectId(id) },
+      {
+        $set: {
+          'checkpoint': checkpoint,
+          updatedAt: new Date()
+        }
+      }
+    );
+  }
+
+  async getCheckpoint(id) {
+    const project = await this.findById(id);
+    return project?.checkpoint || null;
+  }
+
+  async clearCheckpoint(id) {
+    return await this.collection.updateOne(
+      { _id: new ObjectId(id) },
+      {
+        $unset: { checkpoint: 1 },
+        $set: { updatedAt: new Date() }
+      }
+    );
+  }
+
+  async findRecoverableProjects() {
+    // Find projects with checkpoints that can be resumed
+    return await this.collection.find({
+      status: { $in: ['processing', 'failed'] },
+      checkpoint: { $exists: true }
+    }).toArray();
+  }
+
   async findStuckProjects() {
     // Find projects that have been 'processing' for more than 10 minutes
     const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
