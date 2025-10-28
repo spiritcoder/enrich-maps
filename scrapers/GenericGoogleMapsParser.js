@@ -228,7 +228,7 @@ class GenericGoogleMapsParser {
 
     let previousHeight = 0;
     let stableCount = 0;
-    const maxScrolls = 15; // Increased from 3 to 15
+    const maxScrolls = 200; // Increased from 3 to 15
     
     for (let i = 0; i < maxScrolls; i++) {
       try {
