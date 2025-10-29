@@ -391,6 +391,15 @@ const ProjectActions = ({ project, onDelete, onEnrich }) => {
                 🤖 Enrich Data
               </button>
             )}
+            {project.status === 'completed' && project.excelFile && (
+              <RetryFailedButton 
+                project={project}
+                onRetryStart={() => {
+                  setShowDropdown(false);
+                  window.location.reload(); // Refresh to show processing status
+                }}
+              />
+            )}
             <button 
               style={deleteItemStyle}
               onClick={() => {
@@ -404,6 +413,92 @@ const ProjectActions = ({ project, onDelete, onEnrich }) => {
         </>
       )}
     </div>
+  );
+};
+
+// Retry Failed Button Component
+const RetryFailedButton = ({ project, onRetryStart }) => {
+  const [loading, setLoading] = useState(false);
+  const [failedCount, setFailedCount] = useState(null);
+
+  useEffect(() => {
+    // Check if there are failed records
+    const checkFailedRecords = async () => {
+      try {
+        const response = await fetch(`/api/projects/${project._id}`, {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('token')}`
+          }
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          // This would need backend support to return failed count
+          // For now, show button for all Excel projects
+          setFailedCount(1); // Placeholder
+        }
+      } catch (error) {
+        console.error('Error checking failed records:', error);
+      }
+    };
+
+    if (project.excelFile) {
+      checkFailedRecords();
+    }
+  }, [project._id, project.excelFile]);
+
+  const handleRetryFailed = async () => {
+    if (!window.confirm('Retry failed records with improved search queries?')) {
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await fetch(`/api/projects/${project._id}/retry-failed`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        alert(`Retry started for ${data.failedCount} failed records`);
+        onRetryStart();
+      } else {
+        const error = await response.json();
+        alert(error.error || 'Failed to start retry');
+      }
+    } catch (error) {
+      console.error('Retry failed error:', error);
+      alert('Failed to start retry. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (!failedCount) return null;
+
+  return (
+    <button 
+      style={{
+        display: 'block',
+        width: '100%',
+        padding: '0.75rem 1rem',
+        border: 'none',
+        background: 'none',
+        textAlign: 'left',
+        cursor: loading ? 'not-allowed' : 'pointer',
+        textDecoration: 'none',
+        color: '#f59e0b',
+        opacity: loading ? 0.6 : 1
+      }}
+      onClick={handleRetryFailed}
+      disabled={loading}
+    >
+      {loading ? '⏳ Starting Retry...' : '🔄 Retry Failed Records'}
+    </button>
   );
 };
 

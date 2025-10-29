@@ -347,6 +347,135 @@ router.post('/excel-lookup', async (req, res) => {
   }
 });
 
+// Recalculate results for completed Excel projects
+router.post('/:id/recalculate-results', async (req, res) => {
+  try {
+    const projectId = req.params.id;
+
+    const projectModel = new Project();
+    await projectModel.init();
+
+    const project = await projectModel.findById(projectId);
+    if (!project) {
+      await projectModel.close();
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    // Check ownership
+    if (project.userId.toString() !== req.user._id.toString()) {
+      await projectModel.close();
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    // Only allow for completed Excel lookup projects
+    if (project.status !== 'completed' || !project.excelFile) {
+      await projectModel.close();
+      return res.status(400).json({ error: 'Can only recalculate results for completed Excel lookup projects' });
+    }
+
+    // Count actual businesses in database
+    const { MongoClient } = require('mongodb');
+    const client = new MongoClient(process.env.MONGODB_URI);
+    await client.connect();
+    const db = client.db(`saas_${projectId}`);
+    
+    const totalCount = await db.collection('businesses').countDocuments({ project_id: projectId });
+    const foundCount = await db.collection('businesses').countDocuments({ 
+      project_id: projectId, 
+      lookup_success: true 
+    });
+    
+    await client.close();
+
+    // Update project results
+    await projectModel.updateResults(projectId, { 
+      found: foundCount, 
+      processed: totalCount 
+    });
+    
+    await projectModel.close();
+
+    res.json({
+      message: 'Results recalculated successfully',
+      found: foundCount,
+      processed: totalCount
+    });
+
+  } catch (error) {
+    console.error('Recalculate results error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Retry failed records for Excel lookup project
+router.post('/:id/retry-failed', async (req, res) => {
+  try {
+    const projectId = req.params.id;
+
+    const projectModel = new Project();
+    await projectModel.init();
+
+    const project = await projectModel.findById(projectId);
+    if (!project) {
+      await projectModel.close();
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    // Check ownership
+    if (project.userId.toString() !== req.user._id.toString()) {
+      await projectModel.close();
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    // Only allow retry for completed Excel lookup projects
+    if (project.status !== 'completed' || !project.excelFile) {
+      await projectModel.close();
+      return res.status(400).json({ error: 'Can only retry failed records for completed Excel lookup projects' });
+    }
+
+    // Check if there are failed records
+    const { MongoClient } = require('mongodb');
+    const client = new MongoClient(process.env.MONGODB_URI);
+    await client.connect();
+    const db = client.db(`saas_${projectId}`);
+    
+    const failedCount = await db.collection('businesses').countDocuments({
+      project_id: projectId,
+      lookup_success: false
+    });
+    
+    await client.close();
+
+    if (failedCount === 0) {
+      await projectModel.close();
+      return res.status(400).json({ error: 'No failed records found to retry' });
+    }
+
+    // Update project status to processing
+    await projectModel.updateStatus(projectId, 'processing');
+    await projectModel.close();
+
+    // Add retry job to queue
+    const { createScrapingJob } = require('../../services/JobQueue');
+    await createScrapingJob(projectId, {
+      jobType: 'excel-lookup-retry',
+      projectId,
+      excelFile: project.excelFile.path,
+      failedCount,
+      enrichment: project.enrichment
+    });
+
+    res.json({
+      message: 'Retry job started',
+      failedCount
+    });
+
+  } catch (error) {
+    console.error('Retry failed error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Delete project
 router.delete('/:id', async (req, res) => {
   try {

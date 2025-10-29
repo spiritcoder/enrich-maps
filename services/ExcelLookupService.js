@@ -8,7 +8,7 @@ class ExcelLookupService {
     this.lookup = new MapsOnlyLookup();
   }
 
-  async processExcelFile(filePath, progressCallback, projectId = null, db = null) {
+  async processExcelFile(filePath, progressCallback, projectId = null, db = null, retryFailed = false) {
     try {
       await this.lookup.initialize();
       
@@ -25,8 +25,31 @@ class ExcelLookupService {
       let foundCount = 0;
       let startIndex = 0;
       
-      // PHASE 2: Check for existing checkpoint to resume processing
-      if (projectId) {
+      // PHASE 2: Handle retry failed mode or normal checkpoint resume
+      let failedRecords = [];
+      if (retryFailed && projectId && db) {
+        // Get failed records for retry
+        const businessCollection = db.collection('businesses');
+        const failed = await businessCollection.find(
+          { project_id: projectId, lookup_success: false },
+          { projection: { original_name: 1, subdivision: 1, country: 1, row_index: 1 } }
+        ).toArray();
+        
+        failedRecords = failed.map(f => ({
+          name: f.original_name,
+          subdivision: f.subdivision || '',
+          country: f.country || '',
+          rowIndex: f.row_index || 0
+        }));
+        
+        console.log(`🔄 Retry mode: Found ${failedRecords.length} failed records to retry`);
+        
+        if (failedRecords.length === 0) {
+          console.log(`✅ No failed records to retry`);
+          return [];
+        }
+      } else if (projectId) {
+        // Normal checkpoint resume
         const Project = require('../api/models/Project');
         const projectModel = new Project();
         await projectModel.init();
@@ -54,28 +77,42 @@ class ExcelLookupService {
         console.log(`📋 Found ${existing.length} existing businesses, will skip duplicates`);
       }
       
-      for (let i = startIndex; i < data.length; i++) {
-        const row = data[i];
-        const businessName = this.extractBusinessName(row);
-        const subdivision = this.extractSubdivision(row);
-        const country = this.extractCountry(row);
-        const location = subdivision; // Use subdivision as primary location
+      // Determine processing list
+      const processingList = retryFailed ? failedRecords : 
+        data.slice(startIndex).map((row, index) => ({
+          name: this.extractBusinessName(row),
+          subdivision: this.extractSubdivision(row),
+          country: this.extractCountry(row),
+          rowIndex: startIndex + index,
+          originalRow: row
+        }));
+      
+      for (let i = 0; i < processingList.length; i++) {
+        const item = processingList[i];
+        const businessName = item.name;
+        const subdivision = item.subdivision;
+        const country = item.country;
+        const rowIndex = item.rowIndex;
+        const row = item.originalRow || {};
         
         if (!businessName) {
-          console.log(`⚠️ Skipping row ${i + 1}: No business name found`);
+          console.log(`⚠️ Skipping ${retryFailed ? 'failed record' : `row ${rowIndex + 1}`}: No business name found`);
           processedCount++;
           continue;
         }
 
-        // Skip if already processed (duplicate prevention)
-        if (existingBusinesses.has(businessName.toLowerCase())) {
+        // Skip if already processed (only for normal mode)
+        if (!retryFailed && existingBusinesses.has(businessName.toLowerCase())) {
           console.log(`↻ Skipping ${businessName}: Already processed`);
           processedCount++;
           continue;
         }
 
         const locationInfo = [subdivision, country].filter(Boolean).join(', ');
-        console.log(`\n🔍 Processing ${i + 1}/${data.length}: ${businessName}${locationInfo ? ` in ${locationInfo}` : ''}`);
+        const totalCount = retryFailed ? failedRecords.length : data.length;
+        const currentIndex = retryFailed ? i + 1 : rowIndex + 1;
+        
+        console.log(`\n🔍 ${retryFailed ? 'Retrying' : 'Processing'} ${currentIndex}/${totalCount}: ${businessName}${locationInfo ? ` in ${locationInfo}` : ''}`);
         
         // Single lookup attempt - MapsOnlyLookup handles its own retry strategy with 4 queries
         let result = null;
@@ -114,7 +151,7 @@ class ExcelLookupService {
             processed_at: new Date().toISOString(),
             project_id: projectId,
             created_at: new Date(),
-            row_index: i
+            row_index: rowIndex
           };
           
           foundCount++;
@@ -128,9 +165,10 @@ class ExcelLookupService {
             processed_at: new Date().toISOString(),
             project_id: projectId,
             created_at: new Date(),
-            row_index: i,
+            row_index: rowIndex,
             subdivision: subdivision,
-            country: country
+            country: country,
+            failure_reason: 'No results found'
           };
           
           const searchLocation = [subdivision, country].filter(Boolean).join(', ');
@@ -140,8 +178,8 @@ class ExcelLookupService {
         results.push(enrichedRow);
         processedCount++;
 
-        // PHASE 1: Progressive saving - Save immediately to database
-        if (db && projectId && hasValidData) {
+        // PHASE 1: Progressive saving - Save ALL records (successful AND failed)
+        if (db && projectId) {
           let saveRetries = 0;
           const maxSaveRetries = 3;
           let saved = false;
@@ -149,8 +187,21 @@ class ExcelLookupService {
           while (saveRetries < maxSaveRetries && !saved) {
             try {
               const businessCollection = db.collection('businesses');
-              await businessCollection.insertOne(enrichedRow);
-              console.log(`💾 Saved to database: ${businessName}`);
+              
+              if (retryFailed) {
+                // Update existing failed record
+                await businessCollection.updateOne(
+                  { project_id: projectId, original_name: businessName },
+                  { $set: enrichedRow }
+                );
+                console.log(`💾 Updated in database: ${businessName}`);
+              } else {
+                // Insert ALL records (successful AND failed)
+                await businessCollection.insertOne(enrichedRow);
+                const status = hasValidData ? 'successful' : 'failed';
+                console.log(`💾 Saved ${status} record to database: ${businessName}`);
+              }
+              
               saved = true;
             } catch (saveError) {
               saveRetries++;
@@ -184,7 +235,7 @@ class ExcelLookupService {
 
         // Progress callback with real counts
         if (progressCallback) {
-          await progressCallback(processedCount, data.length, foundCount);
+          await progressCallback(processedCount, totalCount, foundCount);
         }
 
         // Adaptive rate limiting based on success/failure
@@ -201,7 +252,8 @@ class ExcelLookupService {
         await new Promise(resolve => setTimeout(resolve, delay));
       }
 
-      console.log(`\n📊 Excel processing completed: ${foundCount}/${processedCount} businesses found`);
+      const mode = retryFailed ? 'retry' : 'processing';
+      console.log(`\n📊 Excel ${mode} completed: ${foundCount}/${processedCount} businesses found`);
       return results;
       
     } catch (error) {

@@ -59,6 +59,32 @@ const ProjectDetail = () => {
     }
   };
 
+  const handleRecalculateResults = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`/api/projects/${project._id}/recalculate-results`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (!response.ok) {
+        throw new Error('Recalculation failed');
+      }
+      
+      const data = await response.json();
+      alert(`Results updated: ${data.found} found, ${data.processed} processed`);
+      
+      // Reload project data
+      loadProject();
+    } catch (error) {
+      console.error('Recalculate error:', error);
+      alert('Failed to recalculate results. Please try again.');
+    }
+  };
+
   if (loading) {
     return (
       <div style={{ padding: '2rem', textAlign: 'center' }}>
@@ -181,6 +207,20 @@ const ProjectDetail = () => {
             >
               📥 Download Results
             </button>
+          </div>
+        )}
+        
+        {project.status === 'completed' && project.excelFile && (!project.results?.processed || project.results?.processed === 0) && (
+          <div style={{ marginTop: '1rem' }}>
+            <button 
+              onClick={handleRecalculateResults}
+              style={{ ...downloadButtonStyle, background: '#f59e0b' }}
+            >
+              🔄 Fix Results Count
+            </button>
+            <p style={{ fontSize: '0.9rem', color: '#6b7280', marginTop: '0.5rem' }}>
+              Click to recalculate results from database
+            </p>
           </div>
         )}
       </div>

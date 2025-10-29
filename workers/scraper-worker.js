@@ -106,6 +106,114 @@ scrapingQueue.process('enrich-project', async (job) => {
   }
 });
 
+// Process Excel lookup retry jobs
+scrapingQueue.process('excel-lookup-retry', async (job) => {
+  try {
+    const { projectId, excelFile, failedCount, enrichment } = job.data;
+    
+    const projectModel = new Project();
+    await projectModel.init();
+    await projectModel.updateStatus(projectId, 'processing');
+    
+    const project = await projectModel.findById(projectId);
+    if (!project) {
+      throw new Error(`Project not found: ${projectId}`);
+    }
+    
+    console.log(`🔄 Retrying ${failedCount} failed records for project ${projectId}`);
+    
+    // Create database connection
+    const { MongoClient } = require('mongodb');
+    const client = new MongoClient(process.env.MONGODB_URI || 'mongodb://localhost:27017');
+    await client.connect();
+    
+    const dbName = `saas_${projectId}`;
+    const db = client.db(dbName);
+    
+    // Process Excel file in retry mode
+    const ExcelLookupService = require('../services/ExcelLookupService');
+    const service = new ExcelLookupService();
+    
+    let processedCount = 0;
+    let foundCount = 0;
+    
+    const results = await service.processExcelFile(excelFile, async (current, total, found) => {
+      processedCount = current;
+      foundCount = found;
+      
+      const progressPercent = Math.min(Math.round((current / total) * 100), 99);
+      await job.progress(progressPercent);
+      
+      // Update project progress in real-time
+      await projectModel.updateResults(projectId, {
+        found: project.results.found + foundCount,
+        processed: project.results.processed
+      });
+    }, projectId, db, true); // retryFailed = true
+    
+    console.log(`📊 Retry completed: ${foundCount} previously failed records now found`);
+    
+    // Handle enrichment for newly found records if enabled
+    let enrichedCount = 0;
+    if (enrichment?.enabled && enrichment.fields?.length > 0 && foundCount > 0) {
+      const { AI_PROVIDERS } = require('../config/enrichment-config');
+      const enrichmentRate = AI_PROVIDERS[enrichment.aiProvider]?.costPerBusiness || 0;
+      const enrichmentCost = foundCount * enrichmentRate;
+      
+      const userModel = new User();
+      await userModel.init();
+      const user = await userModel.findById(project.userId);
+      const remainingCredits = (user.subscription?.monthlyLimit || 50) + (user.credits?.balance || 0) - user.usage.currentMonth;
+      
+      if (enrichmentCost <= remainingCredits) {
+        const SaaSScraper = require('../scripts/saas-scraper');
+        const scraper = new SaaSScraper(projectId);
+        enrichedCount = await scraper.enrichBusinessData(db, enrichment, foundCount);
+        
+        const actualEnrichmentCost = enrichedCount * enrichmentRate;
+        await userModel.updateUsage(user._id, actualEnrichmentCost);
+      }
+      
+      await userModel.close();
+    }
+    
+    // Complete project before closing connections
+    await projectModel.updateStatus(projectId, 'completed', { 
+      completedAt: new Date(),
+      lastRetry: {
+        retriedAt: new Date(),
+        failedRecordsRetried: failedCount,
+        newlyFound: foundCount
+      }
+    });
+    
+    // Close all connections after operations complete
+    await client.close();
+    await projectModel.close();
+    
+    console.log(`✅ Excel retry job ${job.id} completed: ${foundCount} new records found`);
+    return { success: true, newlyFound: foundCount, retriedCount: failedCount };
+    
+  } catch (error) {
+    console.error(`❌ Excel retry job ${job.id} failed:`, error.message);
+    
+    try {
+      const projectModel = new Project();
+      await projectModel.init();
+      await projectModel.updateStatus(job.data.projectId, 'failed', {
+        error: error.message,
+        failedAt: new Date(),
+        retryFailed: true
+      });
+      await projectModel.close();
+    } catch (updateError) {
+      console.error('Failed to update project status:', updateError.message);
+    }
+    
+    throw error;
+  }
+});
+
 // Process Excel lookup jobs
 scrapingQueue.process('excel-lookup', async (job) => {
   try {
@@ -200,18 +308,18 @@ scrapingQueue.process('excel-lookup', async (job) => {
       }
     }
     
-    await client.close();
-    
-    // Complete project
+    // Complete project before closing connections
     await projectModel.updateStatus(projectId, 'completed', { completedAt: new Date() });
-    await projectModel.updateResults(projectId, { found: foundCount, processed: foundCount });
-    await projectModel.updateProgress(projectId, foundCount, businessCount, enrichedCount);
-    
-    await projectModel.close();
-    await userModel.close();
+    await projectModel.updateResults(projectId, { found: foundCount, processed: processedCount });
+    await projectModel.updateProgress(projectId, processedCount, businessCount, enrichedCount);
     
     // PHASE 2: Clear checkpoint on successful completion
     await projectModel.clearCheckpoint(projectId);
+    
+    // Close all connections after operations complete
+    await client.close();
+    await projectModel.close();
+    await userModel.close();
     
     console.log(`✅ Excel lookup job ${job.id} completed: ${foundCount} businesses found`);
     return { success: true, totalFound: foundCount, totalProcessed: foundCount };
