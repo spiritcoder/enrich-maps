@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { projects, user } from '../services/api';
 import EnrichmentModal from '../components/EnrichmentModal';
 import ExcelUpload from '../components/ExcelUpload';
+import DataEnricher from '../components/DataEnricher';
 
 const Dashboard = () => {
   const [projectList, setProjectList] = useState([]);
@@ -10,6 +11,7 @@ const Dashboard = () => {
   const [loading, setLoading] = useState(true);
   const [enrichmentModal, setEnrichmentModal] = useState({ show: false, project: null });
   const [showExcelUpload, setShowExcelUpload] = useState(false);
+  const [showDataEnricher, setShowDataEnricher] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -216,6 +218,12 @@ const Dashboard = () => {
           <h3>🚀 Your Projects</h3>
           <div style={{ display: 'flex', gap: '1rem' }}>
             <button 
+              onClick={() => setShowDataEnricher(true)}
+              style={{ ...buttonStyle, background: '#8b5cf6' }}
+            >
+              🤖 Data Enricher
+            </button>
+            <button 
               onClick={() => setShowExcelUpload(true)}
               style={{ ...buttonStyle, background: '#10b981' }}
             >
@@ -281,6 +289,14 @@ const Dashboard = () => {
             closeEnrichmentModal();
             loadData(); // Refresh data
           }}
+        />
+      )}
+
+      {/* Data Enricher Modal */}
+      {showDataEnricher && (
+        <DataEnricher 
+          onProjectCreated={handleExcelProjectCreated}
+          onClose={() => setShowDataEnricher(false)}
         />
       )}
 
@@ -400,6 +416,15 @@ const ProjectActions = ({ project, onDelete, onEnrich }) => {
                 }}
               />
             )}
+            {project.status === 'completed' && project.type === 'data-enricher' && (
+              <RetryEnrichmentButton 
+                project={project}
+                onRetryStart={() => {
+                  setShowDropdown(false);
+                  window.location.reload(); // Refresh to show processing status
+                }}
+              />
+            )}
             <button 
               style={deleteItemStyle}
               onClick={() => {
@@ -498,6 +523,76 @@ const RetryFailedButton = ({ project, onRetryStart }) => {
       disabled={loading}
     >
       {loading ? '⏳ Starting Retry...' : '🔄 Retry Failed Records'}
+    </button>
+  );
+};
+
+// Retry Enrichment Button Component for Data Enricher projects
+const RetryEnrichmentButton = ({ project, onRetryStart }) => {
+  const [loading, setLoading] = useState(false);
+  const [stats, setStats] = useState(null);
+
+  useEffect(() => {
+    // Get enrichment statistics
+    const getStats = async () => {
+      try {
+        const { dataEnricher } = await import('../services/api');
+        const response = await dataEnricher.getStats(project._id);
+        setStats(response.data.stats);
+      } catch (error) {
+        console.error('Error getting enrichment stats:', error);
+      }
+    };
+
+    getStats();
+  }, [project._id]);
+
+  const handleRetryEnrichment = async () => {
+    if (!stats?.canRetry) {
+      alert('No failed enrichments found to retry');
+      return;
+    }
+
+    if (!window.confirm(`Retry ${stats.failed + stats.partial} failed/partial enrichments?`)) {
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const { dataEnricher } = await import('../services/api');
+      const response = await dataEnricher.retryEnrichment(project._id);
+      const data = response.data;
+      alert(`Retry completed: ${data.successCount}/${data.retriedCount} locations improved`);
+      onRetryStart();
+    } catch (error) {
+      console.error('Retry enrichment error:', error);
+      const message = error.response?.data?.error || 'Failed to retry enrichments';
+      alert(message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (!stats?.canRetry) return null;
+
+  return (
+    <button 
+      style={{
+        display: 'block',
+        width: '100%',
+        padding: '0.75rem 1rem',
+        border: 'none',
+        background: 'none',
+        textAlign: 'left',
+        cursor: loading ? 'not-allowed' : 'pointer',
+        textDecoration: 'none',
+        color: '#8b5cf6',
+        opacity: loading ? 0.6 : 1
+      }}
+      onClick={handleRetryEnrichment}
+      disabled={loading}
+    >
+      {loading ? '⏳ Retrying...' : `🤖 Retry ${stats.failed + stats.partial} Failed Enrichments`}
     </button>
   );
 };

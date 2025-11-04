@@ -233,6 +233,127 @@ router.post('/:id/enrich', async (req, res) => {
   }
 });
 
+// Data Enricher - Upload Excel for AI enrichment
+router.post('/data-enricher', async (req, res) => {
+  try {
+    const multer = require('multer');
+    const upload = multer({ dest: 'uploads/' });
+    
+    upload.single('excelFile')(req, res, async (err) => {
+      if (err) {
+        return res.status(400).json({ error: 'File upload failed' });
+      }
+
+      if (!req.file) {
+        return res.status(400).json({ error: 'No Excel file provided' });
+      }
+
+      const { projectName, selectedFields, aiProvider } = req.body;
+      const filePath = req.file.path;
+
+      try {
+        // Validate Excel file
+        const DataEnricherService = require('../../services/DataEnricherService');
+        const service = new DataEnricherService();
+        const validation = service.validateExcelFile(filePath);
+
+        if (!validation.valid) {
+          return res.status(400).json({ error: validation.error });
+        }
+
+        // Parse selected fields
+        const fields = Array.isArray(selectedFields) ? selectedFields : 
+                      (typeof selectedFields === 'string' ? JSON.parse(selectedFields) : []);
+        
+        if (!fields || fields.length === 0) {
+          return res.status(400).json({ error: 'No enrichment fields selected' });
+        }
+
+        // Calculate costs
+        const locationCount = validation.rowCount;
+        const { LOCATION_AI_PROVIDERS } = require('../../config/location-enrichment-config');
+        const provider = LOCATION_AI_PROVIDERS[aiProvider || 'deepseek'];
+        
+        if (!provider) {
+          return res.status(400).json({ error: 'Invalid AI provider' });
+        }
+        
+        const totalCost = locationCount * provider.costPerLocation;
+        const user = req.user;
+        const availableCredits = (user.subscription?.monthlyLimit || 50) + (user.credits?.balance || 0) - user.usage.currentMonth;
+
+        if (totalCost > availableCredits) {
+          return res.status(400).json({ 
+            error: 'Insufficient credits',
+            required: totalCost,
+            available: availableCredits,
+            locationCount,
+            fieldCount: fields.length,
+            costPerLocation: provider.costPerLocation
+          });
+        }
+
+        // Create project
+        const projectModel = new Project();
+        await projectModel.init();
+
+        const generatedName = projectName?.trim() || `Data Enricher - ${locationCount} locations`;
+        
+        const projectData = {
+          userId: user._id,
+          name: generatedName,
+          searchTerm: 'Data Enricher',
+          locations: ['Excel Upload'],
+          businessLimit: locationCount,
+          type: 'data-enricher',
+          costs: { totalCost },
+          dataEnricher: {
+            originalFile: req.file.originalname,
+            path: filePath,
+            rowCount: locationCount,
+            columns: validation.columns,
+            selectedFields: fields,
+            aiProvider: aiProvider || 'deepseek'
+          }
+        };
+
+        const project = await projectModel.create(projectData);
+        await projectModel.close();
+
+        // Add to job queue
+        const { createScrapingJob } = require('../../services/JobQueue');
+        await createScrapingJob(project._id.toString(), {
+          jobType: 'data-enricher',
+          projectId: project._id.toString(),
+          excelFile: filePath,
+          locationCount,
+          selectedFields: fields,
+          aiProvider: aiProvider || 'deepseek'
+        });
+
+        res.status(201).json({
+          message: 'Data enricher project created successfully',
+          project,
+          validation: {
+            rowCount: locationCount,
+            columns: validation.columns,
+            selectedFields: fields,
+            totalCost
+          }
+        });
+
+      } catch (error) {
+        console.error('Data enricher processing error:', error);
+        res.status(500).json({ error: 'Failed to process Excel file' });
+      }
+    });
+
+  } catch (error) {
+    console.error('Data enricher upload error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Upload Excel for business lookup
 router.post('/excel-lookup', async (req, res) => {
   try {
@@ -472,6 +593,126 @@ router.post('/:id/retry-failed', async (req, res) => {
 
   } catch (error) {
     console.error('Retry failed error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Retry failed enrichments for data enricher project
+router.post('/:id/retry-enrichment', async (req, res) => {
+  try {
+    const projectId = req.params.id;
+
+    const projectModel = new Project();
+    await projectModel.init();
+
+    const project = await projectModel.findById(projectId);
+    if (!project) {
+      await projectModel.close();
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    // Check ownership
+    if (project.userId.toString() !== req.user._id.toString()) {
+      await projectModel.close();
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    // Only allow retry for completed data enricher projects
+    if (project.status !== 'completed' || project.type !== 'data-enricher') {
+      await projectModel.close();
+      return res.status(400).json({ error: 'Can only retry failed enrichments for completed data enricher projects' });
+    }
+
+    // Connect to project database
+    const { MongoClient } = require('mongodb');
+    const client = new MongoClient(process.env.MONGODB_URI);
+    await client.connect();
+    const db = client.db(`saas_${projectId}`);
+
+    // Check if there are failed enrichments
+    const DataEnricherService = require('../../services/DataEnricherService');
+    const service = new DataEnricherService();
+    const stats = await service.getEnrichmentStats(projectId, db);
+
+    if (!stats.canRetry) {
+      await client.close();
+      await projectModel.close();
+      return res.status(400).json({ error: 'No failed enrichments found to retry' });
+    }
+
+    // Update project status to processing
+    await projectModel.updateStatus(projectId, 'processing');
+    await projectModel.close();
+
+    // Start retry process
+    const retryResult = await service.retryFailedEnrichments(projectId, db);
+    
+    // Update project status back to completed
+    const projectModel2 = new Project();
+    await projectModel2.init();
+    await projectModel2.updateStatus(projectId, 'completed', {
+      lastRetryAt: new Date(),
+      lastRetryResult: retryResult
+    });
+    await projectModel2.close();
+    
+    await client.close();
+
+    res.json({
+      message: 'Enrichment retry completed',
+      retriedCount: retryResult.retriedCount,
+      successCount: retryResult.successCount,
+      stats
+    });
+
+  } catch (error) {
+    console.error('Retry enrichment error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Get enrichment statistics
+router.get('/:id/enrichment-stats', async (req, res) => {
+  try {
+    const projectId = req.params.id;
+
+    const projectModel = new Project();
+    await projectModel.init();
+
+    const project = await projectModel.findById(projectId);
+    if (!project) {
+      await projectModel.close();
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    // Check ownership
+    if (project.userId.toString() !== req.user._id.toString()) {
+      await projectModel.close();
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    await projectModel.close();
+
+    if (project.type !== 'data-enricher') {
+      return res.status(400).json({ error: 'Not a data enricher project' });
+    }
+
+    // Connect to project database
+    const { MongoClient } = require('mongodb');
+    const client = new MongoClient(process.env.MONGODB_URI);
+    await client.connect();
+    const db = client.db(`saas_${projectId}`);
+
+    const DataEnricherService = require('../../services/DataEnricherService');
+    const service = new DataEnricherService();
+    const stats = await service.getEnrichmentStats(projectId, db);
+    
+    await client.close();
+
+    res.json({ stats });
+
+  } catch (error) {
+    console.error('Get enrichment stats error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

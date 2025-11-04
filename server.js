@@ -9,6 +9,7 @@ const downloadRoutes = require('./api/routes/downloads');
 const countryRoutes = require('./api/routes/countries');
 const paymentRoutes = require('./api/routes/payments');
 const enrichmentRoutes = require('./api/routes/enrichment');
+const validationRoutes = require('./api/routes/validation');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -28,6 +29,7 @@ app.use('/api/countries', countryRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/enrichment', enrichmentRoutes);
 app.use('/api/downloads', downloadRoutes);
+app.use('/api', validationRoutes);
 
 // Health check
 app.get('/health', (req, res) => {

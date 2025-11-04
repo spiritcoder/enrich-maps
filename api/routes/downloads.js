@@ -31,12 +31,25 @@ router.get('/:projectId', authenticateToken, async (req, res) => {
     const client = new MongoClient(process.env.MONGODB_URI || 'mongodb://localhost:27017');
     await client.connect();
     const db = client.db(`saas_${projectId}`);
-    const businessCollection = db.collection('businesses');
     
-    // Get all businesses for this project
-    const businesses = await businessCollection.find({ project_id: projectId }).toArray();
+    let data = [];
+    let worksheetName = 'Data';
+    let defaultFields = [];
     
-    if (businesses.length === 0) {
+    // Check if this is a data enricher project
+    if (project.type === 'data-enricher') {
+      const locationCollection = db.collection('locations');
+      data = await locationCollection.find({ project_id: projectId }).toArray();
+      worksheetName = 'Enriched Locations';
+      defaultFields = ['original_name', 'Address', 'Lat', 'Lng', 'Country', 'Subdivision'];
+    } else {
+      const businessCollection = db.collection('businesses');
+      data = await businessCollection.find({ project_id: projectId }).toArray();
+      worksheetName = 'Businesses';
+      defaultFields = ['name', 'phone', 'website', 'address', 'rating', 'review_count', 'country', 'subdivision'];
+    }
+    
+    if (data.length === 0) {
       await client.close();
       await projectModel.close();
       return res.status(404).json({ error: 'No data found for this project' });
@@ -44,13 +57,13 @@ router.get('/:projectId', authenticateToken, async (req, res) => {
 
     // Create Excel workbook in memory
     const workbook = new ExcelJS.Workbook();
-    const worksheet = workbook.addWorksheet('Businesses');
+    const worksheet = workbook.addWorksheet(worksheetName);
     
-    // Get all unique fields from businesses (default + enriched)
-    const allFields = new Set(['name', 'phone', 'website', 'address', 'rating', 'review_count', 'country', 'subdivision']);
-    businesses.forEach(business => {
-      Object.keys(business).forEach(key => {
-        if (!key.startsWith('_') && !['project_id', 'processed_at', 'enriched', 'enriched_at', 'enrichment_provider', 'enrichment_fields', 'enrichment_error'].includes(key)) {
+    // Get all unique fields from data (default + enriched)
+    const allFields = new Set(defaultFields);
+    data.forEach(item => {
+      Object.keys(item).forEach(key => {
+        if (!key.startsWith('_') && !['project_id', 'processed_at', 'enriched', 'enriched_at', 'enrichment_provider', 'enrichment_fields', 'enrichment_error', 'enrichment_success', 'enrichment_status', 'row_index', 'created_at', 'retry_attempted_at'].includes(key)) {
           allFields.add(key);
         }
       });
@@ -66,10 +79,10 @@ router.get('/:projectId', authenticateToken, async (req, res) => {
     }));
     
     // Add data rows
-    businesses.forEach(business => {
+    data.forEach(item => {
       const row = {};
       columns.forEach(field => {
-        row[field] = business[field] || '';
+        row[field] = item[field] || '';
       });
       worksheet.addRow(row);
     });

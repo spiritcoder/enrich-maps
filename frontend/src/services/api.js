@@ -52,6 +52,7 @@ export const projects = {
   delete: (id) => api.delete(`/api/projects/${id}`),
   enrich: (id, enrichmentData) => api.post(`/api/projects/${id}/enrich`, enrichmentData),
   retryFailed: (id) => api.post(`/api/projects/${id}/retry-failed`),
+  recalculateResults: (id) => api.post(`/api/projects/${id}/recalculate-results`),
 };
 
 // Countries API
@@ -76,10 +77,40 @@ export const enrichment = {
   calculateCost: (data) => api.post('/api/enrichment/calculate-cost', data),
 };
 
+// Validation API
+export const validation = {
+  validateExcel: (formData) => api.post('/api/validate-excel', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data',
+    },
+  }),
+};
+
+// Data Enricher Recovery API
+export const dataEnricher = {
+  retryEnrichment: (id) => api.post(`/api/projects/${id}/retry-enrichment`),
+  getStats: (id) => api.get(`/api/projects/${id}/enrichment-stats`),
+};
+
 // Excel Lookup API
 export const createExcelLookupProject = async (formData) => {
   try {
     const response = await api.post('/api/projects/excel-lookup', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    return { success: true, project: response.data.project, validation: response.data.validation };
+  } catch (error) {
+    const message = error.response?.data?.error || error.message || 'Upload failed';
+    throw new Error(message);
+  }
+};
+
+// Data Enricher API
+export const createDataEnricherProject = async (formData) => {
+  try {
+    const response = await api.post('/api/projects/data-enricher', formData, {
       headers: {
         'Content-Type': 'multipart/form-data',
       },

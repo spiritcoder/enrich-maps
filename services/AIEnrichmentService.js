@@ -153,6 +153,34 @@ Return only valid JSON with the field keys exactly as specified above:`;
     });
     return enrichment;
   }
+
+  // Method for location enrichment (used by DataEnricherService)
+  async callAI(provider, prompt, options = {}) {
+    const providerConfig = require('../config/location-enrichment-config').LOCATION_AI_PROVIDERS[provider];
+    if (!providerConfig) {
+      throw new Error(`Invalid location AI provider: ${provider}`);
+    }
+
+    const headers = {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${process.env.DEEPSEEK_API_KEY}`
+    };
+
+    const requestBody = {
+      model: providerConfig.model,
+      messages: [{ role: 'user', content: prompt }],
+      temperature: options.temperature || 0.7,
+      max_tokens: options.maxTokens || 1000
+    };
+
+    try {
+      const response = await axios.post('https://api.deepseek.com/chat/completions', requestBody, { headers });
+      return response.data.choices[0].message.content;
+    } catch (error) {
+      console.error('Location AI call failed:', error.message);
+      throw error;
+    }
+  }
 }
 
 module.exports = AIEnrichmentService;

@@ -5,6 +5,110 @@ const SaaSScraper = require('../scripts/saas-scraper');
 const { getCountriesForScraping } = require('../utils/countries-loader');
 
 
+// Process data enricher jobs
+scrapingQueue.process('data-enricher', async (job) => {
+  try {
+    const { projectId, excelFile, locationCount, selectedFields, aiProvider } = job.data;
+    
+    const projectModel = new Project();
+    await projectModel.init();
+    await projectModel.updateStatus(projectId, 'processing');
+    
+    const project = await projectModel.findById(projectId);
+    if (!project) {
+      throw new Error(`Project not found: ${projectId}`);
+    }
+    
+    const userModel = new User();
+    await userModel.init();
+    const user = await userModel.findById(project.userId);
+    if (!user) {
+      throw new Error(`User not found: ${project.userId}`);
+    }
+    
+    // Validate credits
+    const availableCredits = (user.subscription?.monthlyLimit || 50) + (user.credits?.balance || 0) - user.usage.currentMonth;
+    if (project.costs.totalCost > availableCredits) {
+      throw new Error(`Insufficient credits: need ${project.costs.totalCost}, have ${availableCredits}`);
+    }
+    
+    console.log(`🤖 Processing data enricher: ${locationCount} locations, ${selectedFields.length} fields`);
+    
+    // Create database connection
+    const { MongoClient } = require('mongodb');
+    const client = new MongoClient(process.env.MONGODB_URI || 'mongodb://localhost:27017');
+    await client.connect();
+    
+    const dbName = `saas_${projectId}`;
+    const db = client.db(dbName);
+    
+    // Process Excel file with AI enrichment and recovery
+    const DataEnricherService = require('../services/DataEnricherService');
+    const service = new DataEnricherService();
+    
+    let processedCount = 0;
+    let enrichedCount = 0;
+    
+    const results = await service.processExcelFile(
+      excelFile, 
+      selectedFields, 
+      aiProvider,
+      async (current, total, enriched) => {
+        processedCount = current;
+        enrichedCount = enriched;
+        
+        const progressPercent = Math.min(Math.round((current / total) * 100), 99);
+        await job.progress(progressPercent);
+        
+        // Update project progress
+        await projectModel.updateResults(projectId, {
+          found: enrichedCount,
+          processed: processedCount
+        });
+      },
+      projectId,
+      db,
+      false // isRetry = false for initial processing
+    );
+    
+    console.log(`📊 Data enrichment completed: ${enrichedCount} locations enriched`);
+    
+    // Deduct credits
+    await userModel.updateUsage(user._id, project.costs.totalCost);
+    console.log(`💳 Deducted ${project.costs.totalCost} credits for data enrichment`);
+    
+    // Complete project
+    await projectModel.updateStatus(projectId, 'completed', { completedAt: new Date() });
+    await projectModel.updateResults(projectId, { found: enrichedCount, processed: processedCount });
+    await projectModel.updateProgress(projectId, processedCount, locationCount, enrichedCount);
+    
+    // Close connections
+    await client.close();
+    await projectModel.close();
+    await userModel.close();
+    
+    console.log(`✅ Data enricher job ${job.id} completed: ${enrichedCount} locations enriched`);
+    return { success: true, totalEnriched: enrichedCount, totalProcessed: processedCount };
+    
+  } catch (error) {
+    console.error(`❌ Data enricher job ${job.id} failed:`, error.message);
+    
+    try {
+      const projectModel = new Project();
+      await projectModel.init();
+      await projectModel.updateStatus(job.data.projectId, 'failed', {
+        error: error.message,
+        failedAt: new Date()
+      });
+      await projectModel.close();
+    } catch (updateError) {
+      console.error('Failed to update project status:', updateError.message);
+    }
+    
+    throw error;
+  }
+});
+
 // Process enrichment jobs
 scrapingQueue.process('enrich-project', async (job) => {
   try {
