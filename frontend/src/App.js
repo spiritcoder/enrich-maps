@@ -9,6 +9,7 @@ import Billing from './pages/Billing';
 import Plans from './pages/Plans';
 import Credits from './pages/Credits';
 import Navbar from './components/Navbar';
+import AIEnrichment from './components/AIEnrichment';
 import { user as userApi } from './services/api';
 
 function App() {
@@ -94,6 +95,10 @@ function App() {
           <Route 
             path="/credits" 
             element={user ? <Credits onUserUpdate={refreshUser} /> : <Navigate to="/login" />} 
+          />
+          <Route 
+            path="/ai-enrichment" 
+            element={user ? <AIEnrichment /> : <Navigate to="/login" />} 
           />
           <Route 
             path="/" 

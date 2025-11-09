@@ -5,6 +5,8 @@ class AIEnrichmentService {
   constructor(provider, apiKey) {
     this.provider = AI_PROVIDERS[provider];
     this.apiKey = apiKey;
+    this.lastRequestTime = 0;
+    this.minInterval = this.provider.model.includes('claude') ? 20 : 100; // 20ms for Claude (3000/min), 100ms for others
     
     if (!this.provider) {
       throw new Error(`Invalid AI provider: ${provider}`);
@@ -69,6 +71,14 @@ Return only valid JSON with the field keys exactly as specified above:`;
   }
 
   async callAI(prompt) {
+    // Rate limiting
+    const now = Date.now();
+    const timeSinceLastRequest = now - this.lastRequestTime;
+    if (timeSinceLastRequest < this.minInterval) {
+      await new Promise(resolve => setTimeout(resolve, this.minInterval - timeSinceLastRequest));
+    }
+    this.lastRequestTime = Date.now();
+
     const headers = {
       'Content-Type': 'application/json'
     };
@@ -155,7 +165,7 @@ Return only valid JSON with the field keys exactly as specified above:`;
   }
 
   // Method for location enrichment (used by DataEnricherService)
-  async callAI(provider, prompt, options = {}) {
+  async callLocationAI(provider, prompt, options = {}) {
     const providerConfig = require('../config/location-enrichment-config').LOCATION_AI_PROVIDERS[provider];
     if (!providerConfig) {
       throw new Error(`Invalid location AI provider: ${provider}`);

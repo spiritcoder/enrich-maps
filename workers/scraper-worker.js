@@ -2,6 +2,7 @@ const { scrapingQueue, getQueueHealth } = require('../services/JobQueue');
 const Project = require('../api/models/Project');
 const User = require('../api/models/User');
 const SaaSScraper = require('../scripts/saas-scraper');
+const PureAIEnrichmentService = require('../services/PureAIEnrichmentService');
 const { getCountriesForScraping } = require('../utils/countries-loader');
 
 
@@ -606,6 +607,229 @@ scrapingQueue.process('scrape-project', async (job) => {
       console.error('Failed to update project status:', updateError.message);
     }
     
+    throw error;
+  }
+});
+
+// Process AI-only enrichment jobs
+scrapingQueue.process('ai-enrichment-only', async (job) => {
+  try {
+    const { projectId, excelFile, businessCount, selectedFields, aiProvider, enrichmentCost } = job.data;
+    
+    const projectModel = new Project();
+    await projectModel.init();
+    await projectModel.updateStatus(projectId, 'processing');
+    
+    const project = await projectModel.findById(projectId);
+    if (!project) {
+      throw new Error(`Project not found: ${projectId}`);
+    }
+    
+    const userModel = new User();
+    await userModel.init();
+    const user = await userModel.findById(project.userId);
+    if (!user) {
+      throw new Error(`User not found: ${project.userId}`);
+    }
+    
+    // Validate credits
+    const availableCredits = (user.subscription?.monthlyLimit || 50) + (user.credits?.balance || 0) - user.usage.currentMonth;
+    if (enrichmentCost > availableCredits) {
+      throw new Error(`Insufficient credits: need ${enrichmentCost}, have ${availableCredits}`);
+    }
+    
+    console.log(`🤖 Processing AI-only enrichment: ${businessCount} businesses`);
+    
+    // Create database connection
+    const { MongoClient } = require('mongodb');
+    const client = new MongoClient(process.env.MONGODB_URI || 'mongodb://localhost:27017');
+    await client.connect();
+    
+    const dbName = `saas_${projectId}`;
+    const db = client.db(dbName);
+    
+    // Process Excel file with AI enrichment
+    const service = new PureAIEnrichmentService();
+    
+    let processedCount = 0;
+    let enrichedCount = 0;
+    
+    const results = await service.processExcelFileWithAI(
+      excelFile,
+      selectedFields,
+      aiProvider,
+      async (current, total, enriched) => {
+        processedCount = current;
+        enrichedCount = enriched;
+        
+        const progressPercent = Math.min(Math.round((current / total) * 100), 99);
+        await job.progress(progressPercent);
+        
+        // Update project progress
+        await projectModel.updateResults(projectId, {
+          found: enrichedCount,
+          processed: processedCount
+        });
+        
+        await projectModel.updateProgress(projectId, processedCount, total, enrichedCount);
+      },
+      projectId,
+      db
+    );
+    
+    console.log(`📊 AI enrichment completed: ${results.enrichedCount} businesses enriched`);
+    
+    // Deduct credits based on actual enriched count
+    const { AI_PROVIDERS } = require('../config/enrichment-config');
+    const provider = AI_PROVIDERS[aiProvider];
+    const actualCost = results.enrichedCount * (provider?.costPerBusiness || 0);
+    
+    await userModel.updateUsage(user._id, actualCost);
+    console.log(`💳 Deducted ${actualCost} credits for AI enrichment`);
+    
+    // Complete project
+    await projectModel.updateStatus(projectId, 'completed', { 
+      completedAt: new Date(),
+      enrichmentResults: {
+        enriched: results.enrichedCount,
+        failed: results.failedCount,
+        totalProcessed: results.totalProcessed
+      }
+    });
+    
+    // Clear checkpoint on success
+    await service.clearCheckpoint(projectId);
+    
+    // Close connections
+    await client.close();
+    await projectModel.close();
+    await userModel.close();
+    
+    console.log(`✅ AI enrichment job ${job.id} completed: ${results.enrichedCount} businesses enriched`);
+    return { success: true, ...results };
+    
+  } catch (error) {
+    console.error(`❌ AI enrichment job ${job.id} failed:`, error.message);
+    
+    try {
+      const projectModel = new Project();
+      await projectModel.init();
+      await projectModel.updateStatus(job.data.projectId, 'failed', {
+        error: error.message,
+        failedAt: new Date()
+      });
+      await projectModel.close();
+    } catch (updateError) {
+      console.error('Failed to update project status:', updateError.message);
+    }
+    
+    throw error;
+  }
+});
+
+// Process AI enrichment resume jobs
+scrapingQueue.process('ai-enrichment-resume', async (job) => {
+  try {
+    const { projectId } = job.data;
+    
+    const projectModel = new Project();
+    await projectModel.init();
+    const project = await projectModel.findById(projectId);
+    
+    if (!project) {
+      throw new Error(`Project not found: ${projectId}`);
+    }
+    
+    console.log(`🔄 Resuming AI enrichment for project ${projectId}`);
+    
+    // Get checkpoint to find original file and settings
+    const { MongoClient } = require('mongodb');
+    const client = new MongoClient(process.env.MONGODB_URI || 'mongodb://localhost:27017');
+    await client.connect();
+    
+    const db = client.db(`saas_${projectId}`);
+    const service = new PureAIEnrichmentService();
+    const checkpoint = await service.getCheckpoint(projectId);
+    
+    if (!checkpoint) {
+      throw new Error('No checkpoint found to resume from');
+    }
+    
+    // Resume processing
+    const results = await service.processExcelFileWithAI(
+      checkpoint.checkpoint_data.filename,
+      checkpoint.checkpoint_data.selected_fields,
+      checkpoint.checkpoint_data.ai_provider,
+      async (current, total, enriched) => {
+        const progressPercent = Math.min(Math.round((current / total) * 100), 99);
+        await job.progress(progressPercent);
+        
+        await projectModel.updateResults(projectId, {
+          found: enriched,
+          processed: current
+        });
+      },
+      projectId,
+      db
+    );
+    
+    await projectModel.updateStatus(projectId, 'completed', { 
+      completedAt: new Date(),
+      resumedAt: new Date()
+    });
+    
+    await client.close();
+    await projectModel.close();
+    
+    console.log(`✅ AI enrichment resume job ${job.id} completed`);
+    return { success: true, ...results };
+    
+  } catch (error) {
+    console.error(`❌ AI enrichment resume job ${job.id} failed:`, error.message);
+    throw error;
+  }
+});
+
+// Process AI enrichment retry jobs
+scrapingQueue.process('ai-enrichment-retry', async (job) => {
+  try {
+    const { projectId } = job.data;
+    
+    console.log(`🔄 Retrying failed AI enrichments for project ${projectId}`);
+    
+    const { MongoClient } = require('mongodb');
+    const client = new MongoClient(process.env.MONGODB_URI || 'mongodb://localhost:27017');
+    await client.connect();
+    
+    const db = client.db(`saas_${projectId}`);
+    const service = new PureAIEnrichmentService();
+    const checkpoint = await service.getCheckpoint(projectId);
+    
+    if (!checkpoint) {
+      throw new Error('No checkpoint found for retry');
+    }
+    
+    // Retry with isRetry flag
+    const results = await service.processExcelFileWithAI(
+      checkpoint.checkpoint_data.filename,
+      checkpoint.checkpoint_data.selected_fields,
+      checkpoint.checkpoint_data.ai_provider,
+      async (current, total, enriched) => {
+        const progressPercent = Math.min(Math.round((current / total) * 100), 99);
+        await job.progress(progressPercent);
+      },
+      projectId,
+      db,
+      true // isRetry = true
+    );
+    
+    await client.close();
+    
+    console.log(`✅ AI enrichment retry job ${job.id} completed`);
+    return { success: true, ...results };
+    
+  } catch (error) {
+    console.error(`❌ AI enrichment retry job ${job.id} failed:`, error.message);
     throw error;
   }
 });

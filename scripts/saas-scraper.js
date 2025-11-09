@@ -4,7 +4,11 @@ const RateLimiter = require('../services/RateLimiter');
 class SaaSScraper {
   constructor(projectId = null) {
     this.projectId = projectId;
-    this.parser = new GenericGoogleMapsParser(new RateLimiter());
+    this.parsers = [];
+    this.rateLimiter = new RateLimiter();
+    this.jobQueue = [];
+    this.jobIndex = 0;
+    this.checkpointCollection = null;
     this.results = {
       found: 0,
       processed: 0,
@@ -13,17 +17,31 @@ class SaaSScraper {
   }
 
   async init() {
-    await this.parser.init();
+    const concurrentScrapers = process.env.CONCURRENT_SCRAPERS || 5;
+    for (let i = 0; i < concurrentScrapers; i++) {
+      const parser = new GenericGoogleMapsParser(this.rateLimiter);
+      await parser.init();
+      this.parsers.push(parser);
+    }
+    console.log(`🔧 Initialized ${this.parsers.length} concurrent scrapers`);
+  }
+
+  getNextJob() {
+    if (this.jobIndex >= this.jobQueue.length) return null;
+    return this.jobQueue[this.jobIndex++];
   }
 
   // New method for worker compatibility with progressive saving
-  async scrapeBusinesses(rawCollection, query, country, subdivision, limit = 100, progressCallback = null) {
+  async scrapeBusinesses(rawCollection, query, country, subdivision, limit = 100, progressCallback = null, parser = null) {
     try {
-      if (!this.parser.browser) {
+      // Use provided parser or fall back to first parser
+      const selectedParser = parser || this.parsers[0];
+      if (!selectedParser) {
         await this.init();
+        return await this.scrapeBusinesses(rawCollection, query, country, subdivision, limit, progressCallback, this.parsers[0]);
       }
       
-      const savedCount = await this.extractAndSaveBusinesses(rawCollection, query, country, subdivision, limit, progressCallback);
+      const savedCount = await this.extractAndSaveBusinesses(rawCollection, query, country, subdivision, limit, progressCallback, selectedParser);
       return savedCount;
       
     } catch (error) {
@@ -33,13 +51,21 @@ class SaaSScraper {
   }
 
   async scrapeWithLocationLimits(rawCollection, locations, searchTerm, businessLimit, businessesPerLocation = null, progressCallback = null) {
-    let totalSaved = 0;
-    let remainingLimit = businessLimit;
+    if (!this.parsers.length) {
+      await this.init();
+    }
+
+    // Initialize checkpoint collection
+    this.checkpointCollection = rawCollection.s.db.collection('scraping_checkpoints');
     
+    // Create job queue from locations
+    this.jobQueue = [];
+    this.jobIndex = 0;
+    let remainingLimit = businessLimit;
+
     for (const location of locations) {
       if (remainingLimit <= 0) break;
       
-      // Calculate limit for this location
       let locationLimit = businessesPerLocation || remainingLimit;
       locationLimit = Math.min(locationLimit, remainingLimit);
       
@@ -47,33 +73,82 @@ class SaaSScraper {
         ? `${searchTerm} in ${location.subdivision}, ${location.country}`
         : `${searchTerm} in ${location.country}`;
       
-      console.log(`📍 Scraping: ${query} (limit: ${locationLimit})`);
+      this.jobQueue.push({
+        id: `${location.country}_${location.subdivision || 'main'}`,
+        query,
+        country: location.country,
+        subdivision: location.subdivision,
+        limit: locationLimit,
+        label: location.label
+      });
       
-      const savedCount = await this.scrapeBusinesses(
-        rawCollection, 
-        query, 
-        location.country, 
-        location.subdivision, 
-        locationLimit, 
-        progressCallback
-      );
-      
-      totalSaved += savedCount;
-      remainingLimit -= savedCount;
-      
-      console.log(`✅ Saved ${savedCount} businesses in ${location.label} (${remainingLimit} remaining)`);
+      remainingLimit -= locationLimit;
     }
+
+    // Resume from checkpoint
+    await this.resumeFromCheckpoint();
+
+    console.log(`🚀 Starting concurrent scraping with ${this.parsers.length} scrapers for ${this.jobQueue.length - this.jobIndex} remaining locations`);
+
+    // Run concurrent workers
+    const workers = this.parsers.map((parser, index) => 
+      this.runConcurrentWorker(parser, index, rawCollection, progressCallback)
+    );
+
+    const results = await Promise.all(workers);
+    const totalSaved = results.reduce((sum, count) => sum + count, 0);
     
+    // Clear checkpoint on completion
+    await this.clearCheckpoint();
+    
+    console.log(`✅ Concurrent scraping completed: ${totalSaved} total businesses saved`);
     return totalSaved;
   }
+
+  async runConcurrentWorker(parser, workerId, rawCollection, progressCallback) {
+    let workerSaved = 0;
+    
+    while (true) {
+      const job = this.getNextJob();
+      if (!job) break;
+      
+      console.log(`Worker ${workerId}: Processing ${job.query} (limit: ${job.limit})`);
+      
+      try {
+        const savedCount = await this.scrapeBusinesses(
+          rawCollection,
+          job.query,
+          job.country,
+          job.subdivision,
+          job.limit,
+          progressCallback,
+          parser
+        );
+        
+        workerSaved += savedCount;
+        console.log(`Worker ${workerId}: Completed ${job.label} - Saved ${savedCount} businesses`);
+        
+        // Save checkpoint after each completed location
+        await this.saveCheckpoint(job.id, savedCount);
+        
+      } catch (error) {
+        console.error(`Worker ${workerId} error on ${job.query}:`, error.message);
+        // Still save checkpoint for failed jobs to skip them on retry
+        await this.saveCheckpoint(job.id, 0, error.message);
+      }
+    }
+    
+    return workerSaved;
+  }
   
-  async extractAndSaveBusinesses(rawCollection, query, country, subdivision, limit, progressCallback = null) {
-    const page = await this.parser.browser.newPage();
+  async extractAndSaveBusinesses(rawCollection, query, country, subdivision, limit, progressCallback = null, parser = null) {
+    const selectedParser = parser || this.parsers[0];
+    const page = await selectedParser.browser.newPage();
     let savedCount = 0;
     
     try {
       // Set up page
-      const credentials = this.parser.proxyManager.getCredentials();
+      const credentials = selectedParser.proxyManager.getCredentials();
       if (credentials) {
         await page.authenticate(credentials);
       }
@@ -81,25 +156,25 @@ class SaaSScraper {
       await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
       await page.setViewport({ width: 1920, height: 1080 });
       
-      await this.parser.rateLimiter.wait();
+      await selectedParser.rateLimiter.wait();
       
       const searchUrl = `https://www.google.com/maps/search/${encodeURIComponent(query)}`;
-      await page.goto(searchUrl, { waitUntil: 'networkidle0', timeout: 30000 });
+      await page.goto(searchUrl, { waitUntil: 'networkidle0', timeout: 120000 });
       await page.waitForTimeout(5000);
       
       // Handle consent pages
       const pageContent = await page.content();
       const pageTitle = await page.title();
       
-      if (this.parser.isConsentPage(pageContent, pageTitle)) {
+      if (selectedParser.isConsentPage(pageContent, pageTitle)) {
         console.log(`🔒 Handling consent page...`);
-        await this.parser.handleConsentPage(page);
+        await selectedParser.handleConsentPage(page);
         await page.waitForTimeout(3000);
       }
       
-      // Scroll and extract links
-      await this.parser.scrollResults(page);
-      const links = await this.parser.extractBusinessLinks(page);
+      // Improved scrolling to get all results
+      await this.improvedScrollResults(page);
+      const links = await selectedParser.extractBusinessLinks(page);
       
       console.log(`📊 Found ${links.length} business links`);
       
@@ -107,7 +182,7 @@ class SaaSScraper {
       
       for (let i = 0; i < targetCount; i++) {
         try {
-          const details = await this.parser.extractBusinessDetails(links[i]);
+          const details = await selectedParser.extractBusinessDetails(links[i]);
           
           if (details && details.name) {
             details.country = country;
@@ -142,6 +217,143 @@ class SaaSScraper {
     }
     
     return savedCount;
+  }
+
+  async improvedScrollResults(page) {
+    const config = require('../config/scraper');
+    const feedSelectors = config.selectors.feed.split(', ');
+    
+    let feedElement = null;
+    for (const selector of feedSelectors) {
+      try {
+        feedElement = await page.$(selector);
+        if (feedElement) break;
+      } catch (err) {
+        continue;
+      }
+    }
+
+    let previousHeight = 0;
+    let stableCount = 0;
+    const maxScrolls = 500; // Increased from 200
+    const maxStableCount = 8; // Increased from 3
+    
+    
+    for (let i = 0; i < maxScrolls; i++) {
+      try {
+        if (feedElement) {
+          // Get current scroll height
+          const currentHeight = await page.evaluate(el => el.scrollHeight, feedElement);
+          
+          // Scroll to bottom
+          await page.evaluate(el => {
+            el.scrollTop = el.scrollHeight;
+          }, feedElement);
+          
+          // Check if new content loaded
+          if (currentHeight === previousHeight) {
+            stableCount++;
+            if (stableCount >= maxStableCount) {
+              break;
+            }
+          } else {
+            stableCount = 0;
+            previousHeight = currentHeight;
+          }
+        } else {
+          await page.evaluate(() => {
+            window.scrollBy(0, 1000);
+          });
+        }
+        
+        // Longer delays to let Google Maps load content
+        const delay = 3000 + Math.random() * 2000; // 3-5 seconds
+        await page.waitForTimeout(delay);
+        
+      } catch (err) {
+        console.error(`Scroll error ${i + 1}:`, err.message);
+      }
+    } 
+  }
+
+  async saveCheckpoint(locationId, savedCount, error = null) {
+    try {
+      await this.checkpointCollection.updateOne(
+        { 
+          project_id: this.projectId,
+          location_id: locationId
+        },
+        {
+          $set: {
+            project_id: this.projectId,
+            location_id: locationId,
+            completed: true,
+            saved_count: savedCount,
+            completed_at: new Date(),
+            error: error
+          }
+        },
+        { upsert: true }
+      );
+    } catch (err) {
+      console.error('Failed to save checkpoint:', err.message);
+    }
+  }
+
+  async resumeFromCheckpoint() {
+    try {
+      const completedLocations = await this.checkpointCollection
+        .find({ project_id: this.projectId, completed: true })
+        .toArray();
+      
+      const completedIds = new Set(completedLocations.map(loc => loc.location_id));
+      
+      // Filter out completed locations and update jobIndex
+      const originalLength = this.jobQueue.length;
+      this.jobQueue = this.jobQueue.filter(job => !completedIds.has(job.id));
+      
+      const skippedCount = originalLength - this.jobQueue.length;
+      if (skippedCount > 0) {
+        console.log(`🔄 Resumed from checkpoint: Skipping ${skippedCount} completed locations`);
+        
+        // Log completed locations for reference
+        const totalSaved = completedLocations.reduce((sum, loc) => sum + (loc.saved_count || 0), 0);
+        console.log(`📊 Previous progress: ${totalSaved} businesses already saved`);
+      }
+      
+    } catch (err) {
+      console.error('Failed to resume from checkpoint:', err.message);
+      // Continue without checkpoint if there's an error
+    }
+  }
+
+  async clearCheckpoint() {
+    try {
+      await this.checkpointCollection.deleteMany({ project_id: this.projectId });
+      console.log(`🧹 Cleared checkpoints for project ${this.projectId}`);
+    } catch (err) {
+      console.error('Failed to clear checkpoint:', err.message);
+    }
+  }
+
+  async getCheckpointProgress() {
+    try {
+      const checkpoints = await this.checkpointCollection
+        .find({ project_id: this.projectId })
+        .toArray();
+      
+      const totalSaved = checkpoints.reduce((sum, cp) => sum + (cp.saved_count || 0), 0);
+      const completedCount = checkpoints.filter(cp => cp.completed).length;
+      
+      return {
+        completed_locations: completedCount,
+        total_saved: totalSaved,
+        checkpoints: checkpoints
+      };
+    } catch (err) {
+      console.error('Failed to get checkpoint progress:', err.message);
+      return { completed_locations: 0, total_saved: 0, checkpoints: [] };
+    }
   }
 
   async scrapeCountry(rawCollection, country, searchTerm, businessesPerLocation = null, progressCallback = null) {
@@ -359,8 +571,8 @@ class SaaSScraper {
   }
 
   async close() {
-    if (this.parser) {
-      await this.parser.close();
+    for (const parser of this.parsers) {
+      await parser.close();
     }
   }
 

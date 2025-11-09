@@ -38,6 +38,7 @@ const Navbar = ({ user, onLogout }) => {
         </Link>
         <Link to="/dashboard" style={linkStyle}>Dashboard</Link>
         <Link to="/create-project" style={linkStyle}>New Project</Link>
+        <Link to="/ai-enrichment" style={linkStyle}>🤖 AI Enrichment</Link>
         <Link to="/billing" style={linkStyle}>Billing</Link>
       </div>
       
