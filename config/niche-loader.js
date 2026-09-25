@@ -1,33 +1,45 @@
 const fs = require('fs');
 const path = require('path');
 
-class NicheLoader {
-  static loadNiche(nicheName) {
-    try {
-      const nichePath = path.join(__dirname, '..', 'niches', `${nicheName}.json`);
-      const nicheData = JSON.parse(fs.readFileSync(nichePath, 'utf8'));
-      return nicheData;
-    } catch (error) {
-      throw new Error(`Failed to load niche configuration for "${nicheName}": ${error.message}`);
+function loadNicheConfig(nicheName) {
+  try {
+    const configPath = path.join(__dirname, '..', 'niches', `${nicheName}.json`);
+    
+    if (!fs.existsSync(configPath)) {
+      // Return default config if niche file doesn't exist
+      return {
+        name: nicheName,
+        database: {
+          name: `${nicheName}_scraper`,
+          collections: {
+            raw: 'raw_data',
+            processed: 'businesses',
+            jobs: 'scraping_jobs'
+          }
+        },
+        search: {
+          terms: [`${nicheName} in`],
+          maxPerSearch: 100
+        },
+        validation: {
+          includeKeywords: [nicheName],
+          excludeKeywords: [],
+          minRating: 4.0,
+          minReviews: 5,
+          requireContact: true
+        },
+        categories: {
+          'General': [nicheName]
+        }
+      };
     }
-  }
-
-  static getCurrentNiche() {
-    const nicheName = process.env.NICHE || 'museums';
-    return this.loadNiche(nicheName);
-  }
-
-  static listAvailableNiches() {
-    try {
-      const nichesDir = path.join(__dirname, '..', 'niches');
-      const files = fs.readdirSync(nichesDir);
-      return files
-        .filter(file => file.endsWith('.json'))
-        .map(file => file.replace('.json', ''));
-    } catch (error) {
-      return [];
-    }
+    
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    return config;
+  } catch (error) {
+    console.error(`Error loading niche config for ${nicheName}:`, error.message);
+    throw error;
   }
 }
 
-module.exports = NicheLoader;
+module.exports = { loadNicheConfig };

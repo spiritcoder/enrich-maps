@@ -3,13 +3,20 @@ const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const UserAgent = require('user-agents');
 const config = require('../config/scraper');
 const ProxyManager = require('../services/ProxyManager');
-const NicheLoader = require('../config/niche-loader');
 
 puppeteer.use(StealthPlugin());
 
 class GenericGoogleMapsParser {
   constructor(rateLimiter, niche = null) {
-    this.niche = niche || NicheLoader.getCurrentNiche();
+    // Default niche config for when no niche is provided
+    this.niche = niche || {
+      name: 'generic',
+      search: { maxPerSearch: 100 },
+      validation: {
+        includeKeywords: [],
+        excludeKeywords: []
+      }
+    };
     this.proxyManager = new ProxyManager();
     this.rateLimiter = rateLimiter;
     this.browser = null;
@@ -48,7 +55,7 @@ class GenericGoogleMapsParser {
     });
   }
 
-  async scrapeBusinesses(query, country, subdivision) {
+  async scrapeBusinesses(query, country, subdivision, progressCallback = null) {
     const page = await this.browser.newPage();
     const userAgent = new UserAgent();
     
@@ -92,10 +99,8 @@ class GenericGoogleMapsParser {
       const pageTitle = await page.title();
       
       if (this.isConsentPage(pageContent, pageTitle)) {
-        console.log(`🔒 Consent page detected, handling...`);
         const handled = await this.handleConsentPage(page);
         if (!handled) {
-          console.log(`❌ Failed to handle consent page`);
           return 0;
         }
         await page.waitForTimeout(3000);
@@ -123,11 +128,9 @@ class GenericGoogleMapsParser {
       
       for (let i = 0; i < targetCount; i++) {
         try {
-          console.log(`Extracting business ${i + 1}/${targetCount}`);
           const details = await this.extractBusinessDetails(links[i]);
           
           if (details && details.name) {
-            console.log(`Extracted: ${details.name}`);
             
             if (this.isValidBusiness(details.name, details.categories)) {
               details.country = country;
@@ -140,6 +143,11 @@ class GenericGoogleMapsParser {
                 if (result) {
                   savedCount++;
                   console.log(`✓ Saved business ${savedCount}/${targetCount}: ${details.name}`);
+                  
+                  // Call progress callback if provided
+                  if (progressCallback) {
+                    await progressCallback(i + 1, targetCount);
+                  }
                 } else {
                   console.log(`↻ Duplicate skipped: ${details.name}`);
                 }
@@ -176,6 +184,11 @@ class GenericGoogleMapsParser {
   isValidBusiness(name, categories = []) {
     if (!name) return false;
     
+    // If no validation keywords are set, accept all businesses
+    if (!this.niche.validation.includeKeywords || this.niche.validation.includeKeywords.length === 0) {
+      return true;
+    }
+    
     const nameLower = name.toLowerCase();
     
     // Check categories first
@@ -187,7 +200,7 @@ class GenericGoogleMapsParser {
     }
     
     // Check exclude keywords
-    if (this.niche.validation.excludeKeywords.some(keyword => nameLower.includes(keyword.toLowerCase()))) {
+    if (this.niche.validation.excludeKeywords && this.niche.validation.excludeKeywords.some(keyword => nameLower.includes(keyword.toLowerCase()))) {
       return false;
     }
     
@@ -213,12 +226,31 @@ class GenericGoogleMapsParser {
       }
     }
 
-    for (let i = 0; i < 3; i++) {
+    let previousHeight = 0;
+    let stableCount = 0;
+    const maxScrolls = 200; // Increased from 3 to 15
+    
+    for (let i = 0; i < maxScrolls; i++) {
       try {
         if (feedElement) {
+          // Get current scroll height
+          const currentHeight = await page.evaluate(el => el.scrollHeight, feedElement);
+          
+          // Scroll to bottom
           await page.evaluate(el => {
             el.scrollTop = el.scrollHeight;
           }, feedElement);
+          
+          // Check if new content loaded
+          if (currentHeight === previousHeight) {
+            stableCount++;
+            if (stableCount >= 3) {
+              break;
+            }
+          } else {
+            stableCount = 0;
+            previousHeight = currentHeight;
+          }
         } else {
           await page.evaluate(() => {
             window.scrollBy(0, 1000);
@@ -280,27 +312,27 @@ class GenericGoogleMapsParser {
       await detailPage.waitForTimeout(2000 + Math.random() * 3000);
       await this.simulateHumanBehavior(detailPage);
       
-      // Extract name
-      const nameSelectors = config.selectors.name.split(', ');
+      // Extract name using Chrome extension selectors
+      const nameSelectors = ['h1[data-attrid="title"]', '.DUwDvf.lfPIob', '.qBF1Pd.fontHeadlineSmall'];
       for (const selector of nameSelectors) {
         try {
           const nameEl = await detailPage.$(selector);
           if (nameEl) {
-            details.name = (await detailPage.evaluate(el => el.innerText, nameEl)).trim();
-            break;
+            details.name = (await detailPage.evaluate(el => el.textContent?.trim(), nameEl));
+            if (details.name) break;
           }
         } catch (err) {
           continue;
         }
       }
       
-      // Extract category
-      const categorySelectors = config.selectors.category.split(', ');
+      // Extract category using Chrome extension selectors
+      const categorySelectors = ['.DkEaL', '.YhemCb'];
       for (const selector of categorySelectors) {
         try {
           const catEl = await detailPage.$(selector);
           if (catEl) {
-            const categoryText = (await detailPage.evaluate(el => el.innerText, catEl)).trim();
+            const categoryText = (await detailPage.evaluate(el => el.textContent?.trim(), catEl));
             if (categoryText && !categoryText.includes('directions') && !categoryText.includes('call')) {
               details.categories = [categoryText];
               break;
@@ -311,13 +343,13 @@ class GenericGoogleMapsParser {
         }
       }
       
-      // Extract rating
-      const ratingSelectors = config.selectors.rating.split(', ');
+      // Extract rating using Chrome extension selectors
+      const ratingSelectors = ['.MW4etd', '.ceNzKf'];
       for (const selector of ratingSelectors) {
         try {
           const ratingEl = await detailPage.$(selector);
           if (ratingEl) {
-            const ratingText = (await detailPage.evaluate(el => el.innerText, ratingEl)).trim();
+            const ratingText = (await detailPage.evaluate(el => el.textContent?.trim(), ratingEl));
             if (ratingText && /^\d+\.?\d*$/.test(ratingText)) {
               details.rating = parseFloat(ratingText);
               break;
@@ -328,40 +360,64 @@ class GenericGoogleMapsParser {
         }
       }
       
-      // Extract review count
-      const reviewSelectors = config.selectors.reviews.split(', ');
-      for (const selector of reviewSelectors) {
-        try {
-          const reviewEl = await detailPage.$(selector);
-          if (reviewEl) {
-            const reviewText = await detailPage.evaluate(el => {
-              const text = el.innerText || el.textContent || el.getAttribute('aria-label') || '';
-              const match = text.match(/([\d,]+)\s*reviews?/i);
-              return match ? match[1] : null;
-            }, reviewEl);
-            
-            if (reviewText) {
-              details.review_count = parseInt(reviewText.replace(/,/g, ''));
-              break;
+      // Extract review count with comprehensive approach
+      try {
+        const reviewCount = await detailPage.evaluate(() => {
+          // Try multiple approaches to find review count
+          const patterns = [
+            /([\d,]+)\s*reviews?/i,
+            /\(([\d,]+)\)/,
+            /([\d,]+)\s*review/i
+          ];
+          
+          // Search in various elements
+          const selectors = [
+            '.F7nice', '.UY7F9', '.fontTitleSmall', '.fontBodyMedium',
+            '[aria-label*="review"]', '[aria-label*="Review"]',
+            '.ceNzKf', '.MW4etd'
+          ];
+          
+          for (const selector of selectors) {
+            const elements = document.querySelectorAll(selector);
+            for (const el of elements) {
+              const texts = [
+                el.textContent,
+                el.getAttribute('aria-label'),
+                el.parentElement?.textContent,
+                el.nextElementSibling?.textContent
+              ];
+              
+              for (const text of texts) {
+                if (text) {
+                  for (const pattern of patterns) {
+                    const match = text.match(pattern);
+                    if (match && match[1]) {
+                      return match[1].replace(/,/g, '');
+                    }
+                  }
+                }
+              }
             }
           }
-        } catch (err) {
-          continue;
+          
+          return null;
+        });
+        
+        if (reviewCount) {
+          details.review_count = parseInt(reviewCount);
         }
+      } catch (err) {
       }
       
-      // Extract phone
-      const phoneSelectors = config.selectors.phone.split(', ');
+      // Extract phone using Chrome extension selectors
+      const phoneSelectors = ['[data-item-id^="phone"] .Io6YTe', '[data-value*="+"]'];
       for (const selector of phoneSelectors) {
         try {
           const phoneEl = await detailPage.$(selector);
           if (phoneEl) {
-            let phoneText = await detailPage.evaluate(el => el.innerText || el.getAttribute('href'), phoneEl);
+            let phoneText = await detailPage.evaluate(el => el.textContent?.trim(), phoneEl);
             if (phoneText) {
-              if (phoneText.startsWith('tel:')) {
-                phoneText = phoneText.replace('tel:', '');
-              }
-              details.phone = phoneText.trim();
+              details.phone = phoneText;
               break;
             }
           }
@@ -370,8 +426,8 @@ class GenericGoogleMapsParser {
         }
       }
       
-      // Extract website
-      const websiteSelectors = config.selectors.website.split(', ');
+      // Extract website using Chrome extension selectors
+      const websiteSelectors = ['[data-item-id="authority"] .Io6YTe a', 'a[href^="http"]:not([href*="google"])'];
       for (const selector of websiteSelectors) {
         try {
           const websiteEl = await detailPage.$(selector);
@@ -387,27 +443,129 @@ class GenericGoogleMapsParser {
         }
       }
       
-      // Extract address
-      const addressSelectors = config.selectors.address.split(', ');
+      // Extract address using Chrome extension selectors
+      const addressSelectors = ['[data-item-id="address"] .Io6YTe', '.LrzXr'];
       for (const selector of addressSelectors) {
         try {
           const addrEl = await detailPage.$(selector);
           if (addrEl) {
-            details.address = (await detailPage.evaluate(el => el.innerText, addrEl)).trim();
-            break;
+            let addressText = await detailPage.evaluate(el => el.textContent?.trim(), addrEl);
+            if (addressText && addressText.length > 5) {
+              details.address = addressText;
+              break;
+            }
           }
         } catch (err) {
           continue;
         }
       }
       
-      // Extract hours
+      // Extract detailed hours by day
       try {
-        const hoursEl = await detailPage.$('div[data-item-id="oh"], .t39EBf, .OqCZI');
-        if (hoursEl) {
-          details.hours = (await detailPage.evaluate(el => el.innerText, hoursEl)).trim();
+        const hoursTable = await detailPage.$('.t39EBf.GUrTXd table.eK4R0e');
+        if (hoursTable) {
+          const hoursData = await detailPage.evaluate(table => {
+            const rows = table.querySelectorAll('tr.y0skZc');
+            const hours = {};
+            const closedDays = [];
+            
+            rows.forEach(row => {
+              const dayEl = row.querySelector('td.ylH6lf div');
+              const hoursEl = row.querySelector('td.mxowUb .G8aQO') || row.querySelector('td.mxowUb');
+              
+              if (dayEl && hoursEl) {
+                const day = dayEl.textContent.trim();
+                let dayHours = hoursEl.textContent?.trim() || hoursEl.getAttribute('aria-label')?.trim();
+                
+                if (dayHours) {
+                  // Clean hours text
+                  dayHours = dayHours.replace(/\s+to\s+/g, '–').replace(/\s+/g, ' ');
+                  hours[day] = dayHours;
+                  
+                  if (dayHours.toLowerCase().includes('closed')) {
+                    closedDays.push(day);
+                  }
+                }
+              }
+            });
+            
+            return { hours, closedDays };
+          }, hoursTable);
+          
+          if (Object.keys(hoursData.hours).length > 0) {
+            details.hours_detailed = hoursData.hours;
+            details.closed_days = hoursData.closedDays;
+            details.is_open_sunday = hoursData.hours.Sunday && !hoursData.hours.Sunday.toLowerCase().includes('closed');
+            
+            // Create summary hours string
+            const hoursSummary = Object.entries(hoursData.hours)
+              .map(([day, hours]) => `${day}: ${hours}`)
+              .join(', ');
+            details.hours = hoursSummary;
+          }
         }
-      } catch (err) {}
+      } catch (err) {
+        // Fallback to simple hours extraction
+        const hoursSelectors = ['[data-item-id="oh"] .Io6YTe', '.t39EBf .G8aQO', 'div[data-item-id="oh"]', '.t39EBf', '.OqCZI'];
+        for (const selector of hoursSelectors) {
+          try {
+            const hoursEl = await detailPage.$(selector);
+            if (hoursEl) {
+              let hoursText = await detailPage.evaluate(el => {
+                return el.textContent || el.innerText;
+              }, hoursEl);
+              
+              if (hoursText && hoursText.trim().length > 3) {
+                details.hours = hoursText.trim();
+                break;
+              }
+            }
+          } catch (err) {
+            continue;
+          }
+        }
+      }
+      
+      // Extract reviews as array using Chrome extension approach
+      try {
+        // Try to scroll to reviews section first
+        await detailPage.evaluate(() => {
+          const reviewsSection = document.querySelector('.jftiEf') || document.querySelector('[data-review-id]');
+          if (reviewsSection) {
+            reviewsSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        });
+        await detailPage.waitForTimeout(2000);
+        
+        // Try multiple review selectors
+        const reviewSelectors = ['.jftiEf .wiI7pd', '.MyEned .wiI7pd', '.gws-localreviews__google-review', '.ODSEW-ShBeI-text'];
+        let reviewElements = [];
+        
+        for (const selector of reviewSelectors) {
+          reviewElements = await detailPage.$$(selector);
+          if (reviewElements.length > 0) break;
+        }
+        
+        const reviews = [];
+        const maxReviews = Math.min(10, reviewElements.length); // Increased to 10
+        
+        for (let i = 0; i < maxReviews; i++) {
+          try {
+            const reviewText = await detailPage.evaluate(el => el.textContent?.trim(), reviewElements[i]);
+            if (reviewText && reviewText.length > 10) {
+              reviews.push(reviewText);
+            }
+          } catch (err) {
+            continue;
+          }
+        }
+        
+        if (reviews.length > 0) {
+          details.reviews = reviews; // Store as array
+          details.reviews_text = reviews.join(' | '); // Also keep joined version for compatibility
+        }
+      } catch (err) {
+      }
       
       // Extract coordinates from URL (multiple patterns)
       let coordMatch = link.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
@@ -462,21 +620,64 @@ class GenericGoogleMapsParser {
       }
       details.images = images;
       
-      // Extract about/description
-      const aboutSelectors = config.selectors.about.split(', ');
-      for (const selector of aboutSelectors) {
-        try {
-          const aboutEl = await detailPage.$(selector);
-          if (aboutEl) {
-            const aboutText = (await detailPage.evaluate(el => el.innerText, aboutEl)).trim();
-            if (aboutText && aboutText.length > 10) {
-              details.about = aboutText;
+      // Extract about/description by navigating to About tab
+      try {
+        // Look for About tab button
+        const aboutTabSelectors = ['button[data-value="About"]', 'button[aria-label*="About"]', '.RWPxGd button[data-value="About"]', '[role="tab"][data-tab-index="1"]', 'button:contains("About")', '[data-tab-index="1"]'];
+        let aboutTab = null;
+        
+        for (const selector of aboutTabSelectors) {
+          try {
+            aboutTab = await detailPage.$(selector);
+            if (aboutTab) {
               break;
             }
+          } catch (err) {
+            continue;
           }
-        } catch (err) {
-          continue;
         }
+        
+        if (aboutTab) {
+          // Click About tab
+          await aboutTab.click();
+          await detailPage.waitForTimeout(3000);
+          
+          // Extract structured business attributes from About tab
+          const businessAttributes = await detailPage.evaluate(() => {
+            const attributes = {};
+            const sections = document.querySelectorAll('.iP2t7d.fontBodyMedium');
+            
+            sections.forEach(section => {
+              const header = section.querySelector('h2.iL3Qke.fontTitleSmall');
+              if (header) {
+                const categoryName = header.textContent.trim().toLowerCase().replace(/\s+/g, '_');
+                const items = [];
+                
+                const listItems = section.querySelectorAll('li.hpLkke');
+                listItems.forEach(item => {
+                  const span = item.querySelector('span[aria-label]');
+                  if (span) {
+                    const text = span.textContent.trim();
+                    if (text && text.length > 0) {
+                      items.push(text);
+                    }
+                  }
+                });
+                
+                if (items.length > 0) {
+                  attributes[categoryName] = items;
+                }
+              }
+            });
+            
+            return Object.keys(attributes).length > 0 ? attributes : null;
+          });
+          
+          if (businessAttributes) {
+            details.business_attributes = businessAttributes;
+          }
+        } 
+      } catch (err) {
       }
       
       // Fallback: extract review count from about text if not found
@@ -494,7 +695,6 @@ class GenericGoogleMapsParser {
       return details;
       
     } catch (error) {
-      console.error(`Error extracting details from ${link}:`, error.message);
       return null;
     } finally {
       await detailPage.close();

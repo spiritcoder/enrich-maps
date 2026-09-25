@@ -48,6 +48,12 @@ class BusinessCleaner {
       .replace(/[\u2018\u2019]/g, "'")
       .replace(/[\u201C\u201D]/g, '"')
       .replace(/[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g, ' ')
+      .replace(/\u2295/g, '')  // Remove circled plus (⊕) - Google Maps location marker
+      .replace(/\u2299/g, '')  // Remove circled dot (⊙) - alternative map marker
+      .replace(/\u25CF/g, '')  // Remove black circle (●) - map pin
+      .replace(/\u25CB/g, '')  // Remove white circle (○) - map marker
+      .replace(/\u25A0/g, '')  // Remove black square (■) - map marker
+      .replace(/\u25A1/g, '')  // Remove white square (□) - map marker
       .normalize('NFC')
       .replace(/\s+/g, ' ')
       .trim();
