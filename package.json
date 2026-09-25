@@ -1,7 +1,7 @@
 {
-  "name": "terminal-scraper",
+  "name": "enrich-maps",
   "version": "1.0.0",
-  "description": "Terminal scraping system",
+  "description": "Google Maps scraping, Excel reverse lookup, and AI data enrichment platform",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

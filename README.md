@@ -1,4 +1,4 @@
-# TerminalScraper
+# 🚀 EnrichMaps
 
 > **A scalable, production-ready Google Maps scraping, Excel reverse lookup, and multi-model AI data enrichment platform.**
 
@@ -13,7 +13,7 @@
 
 ## Overview
 
-**TerminalScraper** is a high-performance business intelligence and lead-generation system. It bridges the gap between raw web scraping and AI intelligence:
+**EnrichMaps** is a high-performance business intelligence and lead-generation system. It bridges the gap between raw web scraping and AI intelligence:
 
 1. **Anti-Detect Google Maps Scraping**: Extracts verified business data (names, phones, websites, addresses, categories, coordinates, ratings, review counts, hours, and photos) at scale without getting blocked.
 2. **Bulk Excel Lookup**: Upload any spreadsheet of place or business names to reverse-lookup and extract matching Google Maps profiles.
@@ -161,8 +161,8 @@ Before running the application, make sure you have installed:
 
 ### 1. Clone the Repository
 ```bash
-git clone https://github.com/your-username/terminalscraper.git
-cd terminalscraper
+git clone https://github.com/your-username/enrich-maps.git
+cd enrich-maps
 ```
 
 ### 2. Install Dependencies
@@ -246,7 +246,7 @@ npm start
 
 ### Option B: Running the Standalone CLI Pipeline
 
-TerminalScraper can also be used as a standalone, headless CLI tool without running the web UI or user auth.
+EnrichMaps can also be used as a standalone, headless CLI tool without running the web UI or user auth.
 
 #### 1. Run a Niche Scraper
 ```bash
@@ -337,7 +337,7 @@ npm run scrape cafes
 
 ## Testing & Verification
 
-TerminalScraper provides built-in validation and recovery tools:
+EnrichMaps provides built-in validation and recovery tools:
 
 ```bash
 # Validate scraped data against niche rules and rating/contact thresholds
